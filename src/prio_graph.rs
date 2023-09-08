@@ -335,4 +335,20 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn test_shared_read_account_no_conflicts() {
+        // Setup:
+        //   - all transactions read-lock account 0.
+        // 8 -> 6 -> 4 -> 2
+        // 7 -> 5 -> 3 -> 1
+        // Batches: [8, 7], [6, 5], [4, 3], [2, 1]
+        let (transaction_lookup_table, transaction_queue) = setup_test([
+            (vec![8, 6, 4, 2], vec![0], vec![1]),
+            (vec![7, 5, 3, 1], vec![0], vec![2]),
+        ]);
+        let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        let batches = graph.natural_batches();
+        assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
+    }
 }
