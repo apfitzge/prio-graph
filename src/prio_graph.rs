@@ -29,6 +29,8 @@ pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey> {
     nodes: HashMap<Id, GraphNode<Id>>,
     /// Main queue - currently unblocked transactions.
     main_queue: BinaryHeap<Id>,
+    /// Tracks the current set of distinct chains.
+    distinct_chains: HashSet<u32>,
 }
 
 /// A read-lock can be held by multiple transactions, and
@@ -75,6 +77,9 @@ struct GraphNode<Id: PriorityId> {
     blocked_by_count: usize,
     /// Total number of blocked transactions behind this node.
     total_blocked_count: usize,
+    /// Which distinct chain is this part of.
+    /// This is used to detect joins as we scan backwards.
+    chain: u32,
 }
 
 impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
@@ -82,10 +87,12 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
         transaction_lookup_table: &'a HashMap<Id, Tx>,
         reverse_priority_ordered_ids: impl IntoIterator<Item = Id>,
     ) -> Self {
+        let mut next_chain_id = 0;
         let mut graph = PrioGraph {
             locks: HashMap::new(),
             nodes: HashMap::new(),
             main_queue: BinaryHeap::new(),
+            distinct_chains: HashSet::new(),
         };
 
         let mut currently_unblocked = HashSet::new();
@@ -99,11 +106,13 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 edges: HashSet::new(),
                 blocked_by_count: 0,
                 total_blocked_count: 0,
+                chain: 0, // to be filled in later
             };
 
             // Add id into currently unblocked set. It will be removed later if something blocks it.
             currently_unblocked.insert(id);
 
+            let mut chain: Option<u32> = None;
             for read_resource in tx.read_locked_resources() {
                 match graph.locks.entry(*read_resource) {
                     Entry::Occupied(mut entry) => {
@@ -115,6 +124,13 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                             // If this transaction was previously unblocked, remove it from the
                             // unblocked set.
                             currently_unblocked.remove(&blocked_tx);
+
+                            // Update the chain for the current node.
+                            chain = Some(
+                                chain
+                                    .map(|chain| chain.min(blocked_tx_node.chain))
+                                    .unwrap_or(blocked_tx_node.chain),
+                            );
 
                             // Add edges out of current node, update the total blocked count.
                             if node.edges.insert(blocked_tx) {
@@ -144,6 +160,12 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                                 // unblocked set.
                                 currently_unblocked.remove(&blocked_tx);
 
+                                // Update the chain for the current node.
+                                chain = Some(
+                                    chain
+                                        .map(|chain| chain.min(blocked_tx_node.chain))
+                                        .unwrap_or(blocked_tx_node.chain),
+                                );
                                 // Add edges out of current node, update the total blocked count.
                                 if node.edges.insert(blocked_tx) {
                                     blocked_tx_node.blocked_by_count += 1;
@@ -158,6 +180,13 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                     }
                 }
             }
+
+            // If we didn't find any edges, this is a new chain.
+            node.chain = chain.unwrap_or_else(|| {
+                let chain = next_chain_id;
+                next_chain_id += 1;
+                chain
+            });
 
             graph.nodes.insert(id, node);
         }
