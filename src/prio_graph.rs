@@ -3,7 +3,7 @@
 //!
 
 use {
-    crate::{PriorityId, ResourceKey, Transaction},
+    crate::{selection::Selection, PriorityId, ResourceKey, Transaction},
     std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
@@ -156,6 +156,30 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
         graph
     }
 
+    /// Callback controlled iteration through current top-level of the graph.
+    pub fn iterate<Selector: FnMut(Id) -> Selection>(&mut self, mut selector: Selector) {
+        let mut add_back = vec![];
+        while let Some(id) = self.main_queue.pop() {
+            let Selection {
+                selected,
+                continue_iterating,
+            } = selector(id);
+
+            if !selected {
+                add_back.push(id);
+            }
+
+            if !continue_iterating {
+                break;
+            }
+
+            // Node was selected, we must unblock the transactions it was blocking.
+            self.remove_transaction(&id);
+        }
+
+        self.main_queue.extend(add_back);
+    }
+
     /// Steps the graph forward by one iteration.
     /// Drains all transactions from the primary queue into a batch.
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
@@ -171,24 +195,36 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             }
 
             for id in &batch {
-                let node = self.nodes.remove(id).expect("id must exist");
-                for blocked_tx in node.edges.iter() {
-                    let blocked_tx_node = self
-                        .nodes
-                        .get_mut(blocked_tx)
-                        .expect("blocked_tx must exist");
-                    blocked_tx_node.blocked_by_count -= 1;
-
-                    if blocked_tx_node.blocked_by_count == 0 {
-                        self.main_queue.push(*blocked_tx);
-                    }
-                }
+                self.remove_transaction(id);
             }
 
             batches.push(batch);
         }
 
         batches
+    }
+
+    /// Remove a top-level transaction.
+    /// This will unblock transactions that were blocked by this transaction.
+    ///
+    /// Panics:
+    ///     - If the node.blocked_by_count != 0
+    fn remove_transaction(&mut self, id: &Id) {
+        let node = self.nodes.remove(id).expect("id must exist");
+        assert_eq!(node.blocked_by_count, 0, "node must be unblocked");
+
+        // Unblock transactions that were blocked by this node.
+        for blocked_tx in node.edges.iter() {
+            let blocked_tx_node = self
+                .nodes
+                .get_mut(blocked_tx)
+                .expect("blocked_tx must exist");
+            blocked_tx_node.blocked_by_count -= 1;
+
+            if blocked_tx_node.blocked_by_count == 0 {
+                self.main_queue.push(*blocked_tx);
+            }
+        }
     }
 }
 
