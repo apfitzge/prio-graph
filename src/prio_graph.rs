@@ -95,7 +95,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
     /// If any of those transactions are now unblocked, add them to the primary queue.
     /// Repeat until the primary queue is empty.
-    pub fn natural_batches(&mut self) -> Vec<Vec<Id>> {
+    pub fn natural_batches(mut self) -> Vec<Vec<Id>> {
         let mut batches = vec![];
 
         while !self.main_queue.is_empty() {
@@ -179,7 +179,7 @@ mod tests {
         // 3 -> 2 -> 1
         // batches: [3], [2], [1]
         let (transaction_lookup_table, transaction_queue) = setup_test([(vec![3, 2, 1], vec![0])]);
-        let mut graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
         assert_eq!(batches, [[3], [2], [1]]);
     }
@@ -197,7 +197,7 @@ mod tests {
             (vec![6], vec![2]),
         ]);
 
-        let mut graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7, 6], vec![5, 4], vec![3, 2], vec![1]]);
     }
@@ -216,7 +216,7 @@ mod tests {
             (vec![5, 4], vec![1]),
             (vec![2, 1], vec![0, 1]),
         ]);
-        let mut graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6, 5], vec![4, 3], vec![2], vec![1]]);
     }
