@@ -1,26 +1,16 @@
 //! Structure for representing a priority graph - a graph with prioritized
 //! edges.
 //!
-use std::{
-    collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
-    fmt::{Debug, Display},
-    hash::Hash,
+
+use {
+    crate::{PriorityId, ResourceKey, Transaction},
+    std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
-/// A unique identifier that can be used both to identify a transaction
-/// and to order transactions by priority.
-pub trait PriorityId: Copy + Debug + Display + Eq + Ord + Hash {}
-
-/// A unique identifier that can identify resources used by a transaction.
-pub trait ResourceKey: Copy + Eq + Hash {}
-
-pub trait Transaction<Id: PriorityId, Rk: ResourceKey> {
-    fn id(&self) -> Id;
-
-    fn write_locked_resources(&self) -> &[Rk];
-    fn read_locked_resources(&self) -> &[Rk];
-}
-
+/// A directed acyclic graph where edges are only present between nodes if
+/// that node is the next-highest priority node for a particular resource.
+/// Resources can be either read or write locked with write locks being
+/// exclusive.
 pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey> {
     /// Locked resources and which transaction holds them.
     locks: HashMap<Rk, LockKind<Id>>,
