@@ -26,7 +26,7 @@ pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey> {
     locks: HashMap<Rk, LockKind<Id>>,
     /// Graph edges and count of edges into each node. The count is used
     /// to detect joins.
-    edges: HashMap<Id, EdgesAndCount<Id>>,
+    nodes: HashMap<Id, GraphNode<Id>>,
     /// Main queue - currently unblocked transactions.
     main_queue: BinaryHeap<Id>,
 }
@@ -68,7 +68,7 @@ impl<Id: PriorityId> LockKind<Id> {
 }
 
 #[derive(Default)]
-struct EdgesAndCount<Id: PriorityId> {
+struct GraphNode<Id: PriorityId> {
     /// Edges from this node.
     edges: Vec<Id>,
     /// Number of edges into this node.
@@ -82,7 +82,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
     ) -> Self {
         let mut graph = PrioGraph {
             locks: HashMap::new(),
-            edges: HashMap::new(),
+            nodes: HashMap::new(),
             main_queue: BinaryHeap::new(),
         };
 
@@ -97,11 +97,11 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                     Entry::Occupied(mut entry) => {
                         if let Some(blocking_tx) = entry.get_mut().add_read(id) {
                             incoming_edges_count += 1;
-                            let edges_and_count = graph
-                                .edges
+                            let node = graph
+                                .nodes
                                 .get_mut(&blocking_tx)
                                 .expect("blocking_tx must exist");
-                            edges_and_count.edges.push(id);
+                            node.edges.push(id);
                         }
                     }
                     Entry::Vacant(entry) => {
@@ -117,11 +117,11 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                         if let Some(blocking_txs) = entry.get_mut().add_write(id) {
                             incoming_edges_count += blocking_txs.len();
                             for blocking_tx in blocking_txs {
-                                let edges_and_count = graph
-                                    .edges
+                                let node = graph
+                                    .nodes
                                     .get_mut(&blocking_tx)
                                     .expect("blocking_tx must exist");
-                                edges_and_count.edges.push(id);
+                                node.edges.push(id);
                             }
                         }
                     }
@@ -132,9 +132,9 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 }
             }
 
-            graph.edges.insert(
+            graph.nodes.insert(
                 id,
-                EdgesAndCount {
+                GraphNode {
                     edges: vec![],
                     count: incoming_edges_count,
                 },
@@ -161,15 +161,15 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             let batch = self.main_queue.drain().collect();
 
             for id in &batch {
-                let edges_and_count = self.edges.remove(id).expect("id must exist");
-                for blocked_tx in edges_and_count.edges.iter() {
-                    let blocked_tx_edges_and_count = self
-                        .edges
+                let node = self.nodes.remove(id).expect("id must exist");
+                for blocked_tx in node.edges.iter() {
+                    let blocked_tx_node = self
+                        .nodes
                         .get_mut(blocked_tx)
                         .expect("blocked_tx must exist");
-                    blocked_tx_edges_and_count.count -= 1;
+                    blocked_tx_node.count -= 1;
 
-                    if blocked_tx_edges_and_count.count == 0 {
+                    if blocked_tx_node.count == 0 {
                         self.main_queue.push(*blocked_tx);
                     }
                 }
