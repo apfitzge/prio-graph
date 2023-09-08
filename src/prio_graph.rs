@@ -112,13 +112,13 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                                 .nodes
                                 .get_mut(&blocked_tx)
                                 .expect("blocked_tx must exist");
-                            blocked_tx_node.blocked_by_count += 1;
                             // If this transaction was previously unblocked, remove it from the
                             // unblocked set.
                             currently_unblocked.remove(&blocked_tx);
 
                             // Add edges out of current node, update the total blocked count.
                             if node.edges.insert(blocked_tx) {
+                                blocked_tx_node.blocked_by_count += 1;
                                 node.total_blocked_count += blocked_tx_node.total_blocked_count;
                             }
                         }
@@ -139,13 +139,14 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                                     .nodes
                                     .get_mut(&blocked_tx)
                                     .expect("blocked_tx must exist");
-                                blocked_tx_node.blocked_by_count += 1;
+
                                 // If this transaction was previously unblocked, remove it from the
                                 // unblocked set.
                                 currently_unblocked.remove(&blocked_tx);
 
                                 // Add edges out of current node, update the total blocked count.
                                 if node.edges.insert(blocked_tx) {
+                                    blocked_tx_node.blocked_by_count += 1;
                                     node.total_blocked_count += blocked_tx_node.total_blocked_count;
                                 }
                             }
@@ -174,7 +175,10 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
         let mut batches = vec![];
 
         while !self.main_queue.is_empty() {
-            let batch = self.main_queue.drain().collect();
+            let mut batch = Vec::with_capacity(self.main_queue.len());
+            while let Some(id) = self.main_queue.pop() {
+                batch.push(id);
+            }
 
             for id in &batch {
                 let node = self.nodes.remove(id).expect("id must exist");
