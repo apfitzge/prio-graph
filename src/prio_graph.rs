@@ -3,7 +3,7 @@
 //!
 
 use {
-    crate::{PriorityId, ResourceKey, Transaction},
+    crate::{selection::Selection, PriorityId, ResourceKey, Transaction},
     std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
@@ -57,7 +57,8 @@ impl<Id: PriorityId> LockKind<Id> {
     }
 }
 
-struct GraphNode<Id: PriorityId> {
+/// A node in the priority graph.
+pub struct GraphNode<Id: PriorityId> {
     /// Unique edges from this node.
     /// The number of edges is the same as the number of forks.
     edges: HashSet<Id>,
@@ -156,6 +157,35 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
         graph
     }
 
+    /// Callback controlled iteration through current top-level of the graph.
+    pub fn iterate<Selector: FnMut(Id, &GraphNode<Id>) -> Selection>(
+        &mut self,
+        mut selector: Selector,
+    ) {
+        let mut add_back = vec![];
+        while let Some(id) = self.main_queue.pop() {
+            let node = self.nodes.get(&id).expect("id must exist");
+
+            let Selection {
+                selected,
+                continue_iterating,
+            } = selector(id, node);
+
+            // Node was selected, we must unblock the transactions it was blocking.
+            if selected {
+                self.remove_transaction(&id);
+            } else {
+                add_back.push(id);
+            }
+
+            if !continue_iterating {
+                break;
+            }
+        }
+
+        self.main_queue.extend(add_back);
+    }
+
     /// Steps the graph forward by one iteration.
     /// Drains all transactions from the primary queue into a batch.
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
@@ -171,18 +201,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             }
 
             for id in &batch {
-                let node = self.nodes.remove(id).expect("id must exist");
-                for blocked_tx in node.edges.iter() {
-                    let blocked_tx_node = self
-                        .nodes
-                        .get_mut(blocked_tx)
-                        .expect("blocked_tx must exist");
-                    blocked_tx_node.blocked_by_count -= 1;
-
-                    if blocked_tx_node.blocked_by_count == 0 {
-                        self.main_queue.push(*blocked_tx);
-                    }
-                }
+                self.remove_transaction(id);
             }
 
             batches.push(batch);
@@ -190,11 +209,34 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
 
         batches
     }
+
+    /// Remove a top-level transaction.
+    /// This will unblock transactions that were blocked by this transaction.
+    ///
+    /// Panics:
+    ///     - If the node.blocked_by_count != 0
+    fn remove_transaction(&mut self, id: &Id) {
+        let node = self.nodes.remove(id).expect("id must exist");
+        assert_eq!(node.blocked_by_count, 0, "node must be unblocked");
+
+        // Unblock transactions that were blocked by this node.
+        for blocked_tx in node.edges.iter() {
+            let blocked_tx_node = self
+                .nodes
+                .get_mut(blocked_tx)
+                .expect("blocked_tx must exist");
+            blocked_tx_node.blocked_by_count -= 1;
+
+            if blocked_tx_node.blocked_by_count == 0 {
+                self.main_queue.push(*blocked_tx);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use {super::*, std::cell::RefCell};
 
     pub type TxId = u64;
     impl PriorityId for TxId {}
@@ -361,5 +403,65 @@ mod tests {
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
+    }
+
+    #[test]
+    fn test_iterate() {
+        // Setup:
+        // 4
+        //   \
+        //     -> 2 -> 1
+        //   /
+        // 3
+        // 8 -> 7 -> 6 -> 5
+        let (transaction_lookup_table, transaction_queue) = setup_test([
+            (vec![4], vec![], vec![0]),
+            (vec![3], vec![], vec![1]),
+            (vec![2, 1], vec![], vec![0, 1]),
+            (vec![8, 7, 6, 5], vec![], vec![2]),
+        ]);
+        let mut graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+
+        let account_write_locks = RefCell::new(HashMap::new());
+        let scheduled = RefCell::new(Vec::new());
+        let selector = |id: TxId, _: &GraphNode<TxId>| {
+            let transaction = transaction_lookup_table.get(&id).expect("id must exist");
+            let mut account_write_locks = account_write_locks.borrow_mut();
+            let mut scheduled = scheduled.borrow_mut();
+
+            let can_schedule = transaction
+                .write_locked_resources()
+                .iter()
+                .all(|account| !account_write_locks.contains_key(account));
+            if can_schedule {
+                for account in transaction.write_locked_resources() {
+                    account_write_locks.insert(*account, id);
+                }
+                scheduled.push(id);
+            }
+
+            Selection {
+                selected: can_schedule,
+                continue_iterating: true,
+            }
+        };
+
+        graph.iterate(selector);
+        assert_eq!(*scheduled.borrow(), vec![8, 4, 3]);
+        account_write_locks.borrow_mut().remove(&2); // remove the write-lock for account 2, unblocking 7.
+        scheduled.borrow_mut().clear();
+
+        graph.iterate(selector);
+        assert_eq!(*scheduled.borrow(), vec![7]);
+        account_write_locks.borrow_mut().clear();
+        scheduled.borrow_mut().clear();
+
+        graph.iterate(selector);
+        assert_eq!(*scheduled.borrow(), vec![6, 2]);
+        account_write_locks.borrow_mut().clear();
+        scheduled.borrow_mut().clear();
+
+        graph.iterate(selector);
+        assert_eq!(*scheduled.borrow(), vec![5, 1]);
     }
 }
