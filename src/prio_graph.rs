@@ -68,8 +68,8 @@ impl<Id: PriorityId> LockKind<Id> {
 }
 
 struct GraphNode<Id: PriorityId> {
-    /// Edges from this node.
-    edges: Vec<Id>,
+    /// Unique edges from this node.
+    edges: HashSet<Id>,
     /// Number of edges into this node.
     count: usize,
 }
@@ -92,7 +92,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 .get(&id)
                 .expect("transaction not found");
             let mut node = GraphNode {
-                edges: vec![],
+                edges: HashSet::new(),
                 count: 0,
             };
 
@@ -103,7 +103,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 match graph.locks.entry(*read_resource) {
                     Entry::Occupied(mut entry) => {
                         if let Some(blocked_tx) = entry.get_mut().add_read(id) {
-                            node.edges.push(blocked_tx);
+                            node.edges.insert(blocked_tx);
                             let blocked_tx_node = graph
                                 .nodes
                                 .get_mut(&blocked_tx)
@@ -127,7 +127,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                     Entry::Occupied(mut entry) => {
                         if let Some(blocked_txs) = entry.get_mut().add_write(id) {
                             for blocked_tx in blocked_txs {
-                                node.edges.push(blocked_tx);
+                                node.edges.insert(blocked_tx);
                                 let blocked_tx_node = graph
                                     .nodes
                                     .get_mut(&blocked_tx)
