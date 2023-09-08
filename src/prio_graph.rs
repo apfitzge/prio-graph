@@ -94,6 +94,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             let tx = transaction_lookup_table
                 .get(&id)
                 .expect("transaction not found");
+            // TODO: Resizing edges is expensive. We might be better off with an adjacency list.
             let mut node = GraphNode {
                 edges: HashSet::new(),
                 blocked_by_count: 0,
