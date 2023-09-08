@@ -1,12 +1,15 @@
 //! Structure for representing a priority graph - a graph with prioritized
 //! edges.
 //!
-use core::hash::Hash;
-use std::collections::{BinaryHeap, HashMap};
+use std::{
+    collections::{BinaryHeap, HashMap},
+    fmt::Display,
+    hash::Hash,
+};
 
 /// A unique identifier that can be used both to identify a transaction
 /// and to order transactions by priority.
-pub trait PriorityId: Copy + Eq + Ord + Hash {}
+pub trait PriorityId: Copy + Display + Eq + Ord + Hash {}
 
 /// A unique identifier that can identify resources used by a transaction.
 pub trait ResourceKey: Copy + Eq + Hash {}
@@ -20,9 +23,7 @@ pub trait Transaction<Id: PriorityId, Rk: ResourceKey> {
     // fn read_locked_resources(&self) -> &[Rk];
 }
 
-pub struct PrioGraph<'a, Id: PriorityId, Rk: ResourceKey, Tx: Transaction<Id, Rk>> {
-    /// Transaction lookup table
-    transactions: &'a HashMap<Id, Tx>,
+pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey> {
     /// Locked resources and which transaction holds them.
     locks: HashMap<Rk, Id>,
     /// Graph edges and count of edges into each node. The count is used
@@ -40,13 +41,12 @@ struct EdgesAndCount<Id: PriorityId> {
     count: usize,
 }
 
-impl<'a, Id: PriorityId, Rk: ResourceKey, Tx: Transaction<Id, Rk>> PrioGraph<'a, Id, Rk, Tx> {
-    pub fn new(
+impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
+    pub fn new<Tx: Transaction<Id, Rk>>(
         transaction_lookup_table: &'a HashMap<Id, Tx>,
         priority_ordered_ids: impl Iterator<Item = Id>,
     ) -> Self {
         let mut graph = PrioGraph {
-            transactions: transaction_lookup_table,
             locks: HashMap::new(),
             edges: HashMap::new(),
             main_queue: BinaryHeap::new(),
@@ -60,13 +60,17 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Tx: Transaction<Id, Rk>> PrioGraph<'a,
             let resources = tx.locked_resources();
             let mut incoming_edges_count = 0;
             for resource in resources {
-                let Some(other_id) = graph.locks.get(resource) else {
-                    continue;
-                };
+                if let Some(other_id) = graph.locks.get(resource) {
+                    incoming_edges_count += 1;
+                    let edges_and_count = graph.edges.get_mut(other_id).expect("id must exist");
+                    edges_and_count.edges.push(id);
+                }
 
-                incoming_edges_count += 1;
-                let edges_and_count = graph.edges.get_mut(other_id).expect("id must exist");
-                edges_and_count.edges.push(id);
+                // we always take the locks - even if they are already taken.
+                // this makes it so subsequent transactions will be blocked by
+                // this transaction, rather than the higher priority one they
+                // are both blocked by.
+                graph.locks.insert(*resource, id);
             }
 
             graph.edges.insert(
@@ -116,5 +120,93 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Tx: Transaction<Id, Rk>> PrioGraph<'a,
         }
 
         batches
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    pub type TxId = u64;
+    impl PriorityId for TxId {}
+
+    pub type Account = u64;
+    impl ResourceKey for Account {}
+
+    pub struct Tx {
+        id: TxId,
+        locked_resources: Vec<Account>,
+    }
+
+    impl Transaction<TxId, Account> for Tx {
+        fn id(&self) -> TxId {
+            self.id
+        }
+
+        fn locked_resources(&self) -> &[Account] {
+            &self.locked_resources
+        }
+    }
+
+    #[test]
+    fn simple_queue() {
+        // Setup:
+        // 3 -> 2 -> 1
+        // batches: [3], [2], [1]
+
+        let shared_account = 0;
+        let mut transaction_lookup_table = HashMap::new();
+        let mut add_tx = |id: TxId| {
+            transaction_lookup_table.insert(
+                id,
+                Tx {
+                    id,
+                    locked_resources: vec![shared_account],
+                },
+            )
+        };
+        for id in [3, 2, 1] {
+            add_tx(id);
+        }
+
+        let mut graph = PrioGraph::new(&transaction_lookup_table, [3, 2, 1].into_iter());
+        let batches = graph.natural_batches();
+        assert_eq!(batches, [[3], [2], [1]]);
+    }
+
+    #[test]
+    fn multiple_separate_queues() {
+        // Setup:
+        // 8 -> 4 -> 2 -> 1
+        // 7 -> 5 -> 3
+        // 6
+        // batches: [8, 7, 6], [4, 5], [2, 3], [1]
+
+        let mut transaction_lookup_table = HashMap::new();
+        let mut add_tx = |id: TxId, shared_account: Account| {
+            transaction_lookup_table.insert(
+                id,
+                Tx {
+                    id,
+                    locked_resources: vec![shared_account],
+                },
+            )
+        };
+        for id in [8, 4, 2, 1] {
+            add_tx(id, 0);
+        }
+        for id in [7, 5, 3] {
+            add_tx(id, 1);
+        }
+        for id in [6] {
+            add_tx(id, 2);
+        }
+
+        let mut graph = PrioGraph::new(
+            &transaction_lookup_table,
+            [8, 7, 6, 5, 4, 3, 2, 1].into_iter(),
+        );
+        let batches = graph.natural_batches();
+        assert_eq!(batches, [vec![8, 7, 6], vec![5, 4], vec![3, 2], vec![1]]);
     }
 }
