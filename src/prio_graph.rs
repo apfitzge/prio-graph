@@ -2,7 +2,7 @@
 //! edges.
 //!
 use std::{
-    collections::{BinaryHeap, HashMap},
+    collections::{hash_map::Entry, BinaryHeap, HashMap},
     fmt::Display,
     hash::Hash,
 };
@@ -17,20 +17,54 @@ pub trait ResourceKey: Copy + Eq + Hash {}
 pub trait Transaction<Id: PriorityId, Rk: ResourceKey> {
     fn id(&self) -> Id;
 
-    // simplify for now and assume all are write-locked
-    fn locked_resources(&self) -> &[Rk];
-    // fn write_locked_resources(&self) -> &[Rk];
-    // fn read_locked_resources(&self) -> &[Rk];
+    fn write_locked_resources(&self) -> &[Rk];
+    fn read_locked_resources(&self) -> &[Rk];
 }
 
 pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey> {
     /// Locked resources and which transaction holds them.
-    locks: HashMap<Rk, Id>,
+    locks: HashMap<Rk, LockKind<Id>>,
     /// Graph edges and count of edges into each node. The count is used
     /// to detect joins.
     edges: HashMap<Id, EdgesAndCount<Id>>,
     /// Main queue - currently unblocked transactions.
     main_queue: BinaryHeap<Id>,
+}
+
+/// A read-lock can be held by multiple transactions, and
+/// sub-sequent write-locks should be blocked by all of them.
+/// Write-locks are exclusive.
+enum LockKind<Id: PriorityId> {
+    Read(Vec<Id>),
+    Write(Id),
+}
+
+impl<Id: PriorityId> LockKind<Id> {
+    /// Take read-lock on a resource.
+    /// Returns the id of the write transaction that is blocking the added read.
+    pub fn add_read(&mut self, id: Id) -> Option<Id> {
+        match self {
+            LockKind::Read(ids) => {
+                ids.push(id);
+                None
+            }
+            LockKind::Write(_) => {
+                let LockKind::Write(id) = core::mem::replace(self, LockKind::Read(vec![id])) else {
+                    unreachable!("LockKind::Write is guaranteed by match");
+                };
+                Some(id)
+            }
+        }
+    }
+
+    /// Take write-lock on a resource.
+    /// Returns the ids of transactions blocking the added write.
+    pub fn add_write(&mut self, id: Id) -> Option<Vec<Id>> {
+        match core::mem::replace(self, LockKind::Write(id)) {
+            LockKind::Read(ids) => Some(ids),
+            LockKind::Write(id) => Some(vec![id]), // TODO: Remove allocation.
+        }
+    }
 }
 
 #[derive(Default)]
@@ -57,20 +91,45 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 .get(&id)
                 .expect("transaction not found");
 
-            let resources = tx.locked_resources();
             let mut incoming_edges_count = 0;
-            for resource in resources {
-                if let Some(other_id) = graph.locks.get(resource) {
-                    incoming_edges_count += 1;
-                    let edges_and_count = graph.edges.get_mut(other_id).expect("id must exist");
-                    edges_and_count.edges.push(id);
+            for read_resource in tx.read_locked_resources() {
+                match graph.locks.entry(*read_resource) {
+                    Entry::Occupied(mut entry) => {
+                        if let Some(blocking_tx) = entry.get_mut().add_read(id) {
+                            incoming_edges_count += 1;
+                            let edges_and_count = graph
+                                .edges
+                                .get_mut(&blocking_tx)
+                                .expect("blocking_tx must exist");
+                            edges_and_count.edges.push(id);
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        // No existing locks on this resource, simply add.
+                        entry.insert(LockKind::Read(vec![id]));
+                    }
                 }
+            }
 
-                // we always take the locks - even if they are already taken.
-                // this makes it so subsequent transactions will be blocked by
-                // this transaction, rather than the higher priority one they
-                // are both blocked by.
-                graph.locks.insert(*resource, id);
+            for write_resource in tx.write_locked_resources() {
+                match graph.locks.entry(*write_resource) {
+                    Entry::Occupied(mut entry) => {
+                        if let Some(blocking_txs) = entry.get_mut().add_write(id) {
+                            incoming_edges_count += blocking_txs.len();
+                            for blocking_tx in blocking_txs {
+                                let edges_and_count = graph
+                                    .edges
+                                    .get_mut(&blocking_tx)
+                                    .expect("blocking_tx must exist");
+                                edges_and_count.edges.push(id);
+                            }
+                        }
+                    }
+                    Entry::Vacant(entry) => {
+                        // No existing locks on this resource, simply add.
+                        entry.insert(LockKind::Write(id));
+                    }
+                }
             }
 
             graph.edges.insert(
@@ -135,7 +194,8 @@ mod tests {
 
     pub struct Tx {
         id: TxId,
-        locked_resources: Vec<Account>,
+        read_locked_resources: Vec<Account>,
+        write_locked_resources: Vec<Account>,
     }
 
     impl Transaction<TxId, Account> for Tx {
@@ -143,26 +203,31 @@ mod tests {
             self.id
         }
 
-        fn locked_resources(&self) -> &[Account] {
-            &self.locked_resources
+        fn read_locked_resources(&self) -> &[Account] {
+            &self.read_locked_resources
+        }
+
+        fn write_locked_resources(&self) -> &[Account] {
+            &self.write_locked_resources
         }
     }
 
     // Take in groups of transactions, where each group is a set of transaction ids,
-    // and the set of acccounts they lock.
+    // and the read and write locked resources for each transaction.
     fn setup_test(
-        transaction_groups: impl IntoIterator<Item = (Vec<TxId>, Vec<Account>)>,
+        transaction_groups: impl IntoIterator<Item = (Vec<TxId>, Vec<Account>, Vec<Account>)>,
     ) -> (HashMap<TxId, Tx>, Vec<TxId>) {
         let mut transaction_lookup_table = HashMap::new();
         let mut priority_ordered_ids = vec![];
-        for (ids, accounts) in transaction_groups {
+        for (ids, read_accounts, write_accounts) in transaction_groups {
             for id in &ids {
                 priority_ordered_ids.push(*id);
                 transaction_lookup_table.insert(
                     *id,
                     Tx {
                         id: *id,
-                        locked_resources: accounts.clone(),
+                        read_locked_resources: read_accounts.clone(),
+                        write_locked_resources: write_accounts.clone(),
                     },
                 );
             }
@@ -178,7 +243,8 @@ mod tests {
         // Setup:
         // 3 -> 2 -> 1
         // batches: [3], [2], [1]
-        let (transaction_lookup_table, transaction_queue) = setup_test([(vec![3, 2, 1], vec![0])]);
+        let (transaction_lookup_table, transaction_queue) =
+            setup_test([(vec![3, 2, 1], vec![], vec![0])]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
         assert_eq!(batches, [[3], [2], [1]]);
@@ -192,9 +258,9 @@ mod tests {
         // 6
         // batches: [8, 7, 6], [4, 5], [2, 3], [1]
         let (transaction_lookup_table, transaction_queue) = setup_test([
-            (vec![8, 4, 2, 1], vec![0]),
-            (vec![7, 5, 3], vec![1]),
-            (vec![6], vec![2]),
+            (vec![8, 4, 2, 1], vec![], vec![0]),
+            (vec![7, 5, 3], vec![], vec![1]),
+            (vec![6], vec![], vec![2]),
         ]);
 
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
@@ -212,9 +278,9 @@ mod tests {
         // 5 -> 4
         // batches: [6, 5], [3, 4], [2], [1]
         let (transaction_lookup_table, transaction_queue) = setup_test([
-            (vec![6, 3], vec![0]),
-            (vec![5, 4], vec![1]),
-            (vec![2, 1], vec![0, 1]),
+            (vec![6, 3], vec![], vec![0]),
+            (vec![5, 4], vec![], vec![1]),
+            (vec![2, 1], vec![], vec![0, 1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
@@ -231,9 +297,9 @@ mod tests {
         //         -> 4 -> 3
         // batches: [6], [5], [4, 2], [3, 1]
         let (transaction_lookup_table, transaction_queue) = setup_test([
-            (vec![6, 5], vec![0, 1]),
-            (vec![2, 1], vec![0]),
-            (vec![4, 3], vec![1]),
+            (vec![6, 5], vec![], vec![0, 1]),
+            (vec![2, 1], vec![], vec![0]),
+            (vec![4, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
@@ -250,9 +316,9 @@ mod tests {
         //         -> 7 -> 6          -> 3
         // batches: [9], [8], [7, 5], [6], [4], [3, 2], [1]
         let (transaction_lookup_table, transaction_queue) = setup_test([
-            (vec![5, 2, 1], vec![0]),
-            (vec![9, 8, 4], vec![0, 1]),
-            (vec![7, 6, 3], vec![1]),
+            (vec![5, 2, 1], vec![], vec![0]),
+            (vec![9, 8, 4], vec![], vec![0, 1]),
+            (vec![7, 6, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         let batches = graph.natural_batches();
