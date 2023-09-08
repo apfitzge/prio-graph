@@ -3,7 +3,7 @@
 extern crate test;
 
 use {
-    prio_graph::{PrioGraph, PriorityId, ResourceKey, Transaction},
+    prio_graph::{AccessKind, PrioGraph, PriorityId, ResourceKey, Transaction},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{collections::HashMap, fmt::Display},
     test::Bencher,
@@ -54,12 +54,13 @@ impl Transaction<TransactionPriorityId, AccountKey> for TestTransaction {
         self.id
     }
 
-    fn write_locked_resources(&self) -> &[AccountKey] {
-        &self.write_accounts
-    }
-
-    fn read_locked_resources(&self) -> &[AccountKey] {
-        &self.read_accounts
+    fn check_resource_keys<F: FnMut(&AccountKey, AccessKind)>(&self, mut checker: F) {
+        for account in &self.read_accounts {
+            checker(account, AccessKind::Read);
+        }
+        for account in &self.write_accounts {
+            checker(account, AccessKind::Write);
+        }
     }
 }
 
