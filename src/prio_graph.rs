@@ -2,6 +2,8 @@
 //! edges.
 //!
 
+use crate::AccessKind;
+
 use {
     crate::{selection::Selection, PriorityId, ResourceKey, Transaction},
     std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
@@ -95,61 +97,49 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             // Add id into currently unblocked set. It will be removed later if something blocks it.
             currently_unblocked.insert(id);
 
-            for read_resource in tx.read_locked_resources() {
-                match graph.locks.entry(*read_resource) {
-                    Entry::Occupied(mut entry) => {
-                        if let Some(blocked_tx) = entry.get_mut().add_read(id) {
-                            let blocked_tx_node = graph
-                                .nodes
-                                .get_mut(&blocked_tx)
-                                .expect("blocked_tx must exist");
-                            // If this transaction was previously unblocked, remove it from the
-                            // unblocked set.
-                            currently_unblocked.remove(&blocked_tx);
+            let mut block_tx = |blocked_tx: Id| {
+                let blocked_tx_node = graph
+                    .nodes
+                    .get_mut(&blocked_tx)
+                    .expect("blocked_tx must exist");
+                // If this transaction was previously unblocked, remove it from the
+                // unblocked set.
+                currently_unblocked.remove(&blocked_tx);
 
-                            // Add edges out of current node, update the total blocked count.
-                            if node.edges.insert(blocked_tx) {
-                                blocked_tx_node.blocked_by_count += 1;
-                                node.total_blocked_count += blocked_tx_node.total_blocked_count;
+                // Add edges out of current node, update the total blocked count.
+                if node.edges.insert(blocked_tx) {
+                    blocked_tx_node.blocked_by_count += 1;
+                    node.total_blocked_count += blocked_tx_node.total_blocked_count;
+                }
+            };
+
+            tx.check_resource_keys(
+                &mut |resource_key: &Rk, access_kind: AccessKind| match graph
+                    .locks
+                    .entry(*resource_key)
+                {
+                    Entry::Vacant(entry) => {
+                        entry.insert(match access_kind {
+                            AccessKind::Read => LockKind::Read(vec![id]),
+                            AccessKind::Write => LockKind::Write(id),
+                        });
+                    }
+                    Entry::Occupied(mut entry) => match access_kind {
+                        AccessKind::Read => {
+                            if let Some(blocked_tx) = entry.get_mut().add_read(id) {
+                                block_tx(blocked_tx);
                             }
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        // No existing locks on this resource, simply add.
-                        entry.insert(LockKind::Read(vec![id]));
-                    }
-                }
-            }
-
-            for write_resource in tx.write_locked_resources() {
-                match graph.locks.entry(*write_resource) {
-                    Entry::Occupied(mut entry) => {
-                        if let Some(blocked_txs) = entry.get_mut().add_write(id) {
-                            for blocked_tx in blocked_txs {
-                                let blocked_tx_node = graph
-                                    .nodes
-                                    .get_mut(&blocked_tx)
-                                    .expect("blocked_tx must exist");
-
-                                // If this transaction was previously unblocked, remove it from the
-                                // unblocked set.
-                                currently_unblocked.remove(&blocked_tx);
-
-                                // Add edges out of current node, update the total blocked count.
-                                if node.edges.insert(blocked_tx) {
-                                    blocked_tx_node.blocked_by_count += 1;
-                                    node.total_blocked_count += blocked_tx_node.total_blocked_count;
+                        AccessKind::Write => {
+                            if let Some(blocked_txs) = entry.get_mut().add_write(id) {
+                                for blocked_tx in blocked_txs {
+                                    block_tx(blocked_tx);
                                 }
                             }
                         }
-                    }
-                    Entry::Vacant(entry) => {
-                        // No existing locks on this resource, simply add.
-                        entry.insert(LockKind::Write(id));
-                    }
-                }
-            }
-
+                    },
+                },
+            );
             graph.nodes.insert(id, node);
         }
 
@@ -255,12 +245,13 @@ mod tests {
             self.id
         }
 
-        fn read_locked_resources(&self) -> &[Account] {
-            &self.read_locked_resources
-        }
-
-        fn write_locked_resources(&self) -> &[Account] {
-            &self.write_locked_resources
+        fn check_resource_keys<F: FnMut(&Account, AccessKind)>(&self, mut checker: F) {
+            for account in &self.read_locked_resources {
+                checker(account, AccessKind::Read);
+            }
+            for account in &self.write_locked_resources {
+                checker(account, AccessKind::Write);
+            }
         }
     }
 
@@ -429,14 +420,18 @@ mod tests {
             let mut account_write_locks = account_write_locks.borrow_mut();
             let mut scheduled = scheduled.borrow_mut();
 
-            let can_schedule = transaction
-                .write_locked_resources()
-                .iter()
-                .all(|account| !account_write_locks.contains_key(account));
-            if can_schedule {
-                for account in transaction.write_locked_resources() {
-                    account_write_locks.insert(*account, id);
+            let mut can_schedule = true;
+            transaction.check_resource_keys(&mut |account: &TxId, access_kind: AccessKind| {
+                if let AccessKind::Write = access_kind {
+                    can_schedule &= !account_write_locks.contains_key(account);
                 }
+            });
+            if can_schedule {
+                transaction.check_resource_keys(&mut |account: &TxId, access_kind: AccessKind| {
+                    if let AccessKind::Write = access_kind {
+                        account_write_locks.insert(*account, id);
+                    }
+                });
                 scheduled.push(id);
             }
 
