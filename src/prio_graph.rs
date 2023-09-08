@@ -2,14 +2,14 @@
 //! edges.
 //!
 use std::{
-    collections::{hash_map::Entry, BinaryHeap, HashMap},
-    fmt::Display,
+    collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
+    fmt::{Debug, Display},
     hash::Hash,
 };
 
 /// A unique identifier that can be used both to identify a transaction
 /// and to order transactions by priority.
-pub trait PriorityId: Copy + Display + Eq + Ord + Hash {}
+pub trait PriorityId: Copy + Debug + Display + Eq + Ord + Hash {}
 
 /// A unique identifier that can identify resources used by a transaction.
 pub trait ResourceKey: Copy + Eq + Hash {}
@@ -67,7 +67,6 @@ impl<Id: PriorityId> LockKind<Id> {
     }
 }
 
-#[derive(Default)]
 struct GraphNode<Id: PriorityId> {
     /// Edges from this node.
     edges: Vec<Id>,
@@ -78,7 +77,7 @@ struct GraphNode<Id: PriorityId> {
 impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
     pub fn new<Tx: Transaction<Id, Rk>>(
         transaction_lookup_table: &'a HashMap<Id, Tx>,
-        priority_ordered_ids: impl IntoIterator<Item = Id>,
+        reverse_priority_ordered_ids: impl IntoIterator<Item = Id>,
     ) -> Self {
         let mut graph = PrioGraph {
             locks: HashMap::new(),
@@ -86,22 +85,34 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             main_queue: BinaryHeap::new(),
         };
 
-        for id in priority_ordered_ids {
+        let mut currently_unblocked = HashSet::new();
+
+        for id in reverse_priority_ordered_ids {
             let tx = transaction_lookup_table
                 .get(&id)
                 .expect("transaction not found");
+            let mut node = GraphNode {
+                edges: vec![],
+                count: 0,
+            };
 
-            let mut incoming_edges_count = 0;
+            // Add id into currently unblocked set. It will be removed later if something blocks it.
+            currently_unblocked.insert(id);
+
             for read_resource in tx.read_locked_resources() {
                 match graph.locks.entry(*read_resource) {
                     Entry::Occupied(mut entry) => {
-                        if let Some(blocking_tx) = entry.get_mut().add_read(id) {
-                            incoming_edges_count += 1;
-                            let node = graph
+                        if let Some(blocked_tx) = entry.get_mut().add_read(id) {
+                            node.edges.push(blocked_tx);
+                            let blocked_tx_node = graph
                                 .nodes
-                                .get_mut(&blocking_tx)
-                                .expect("blocking_tx must exist");
-                            node.edges.push(id);
+                                .get_mut(&blocked_tx)
+                                .expect("blocked_tx must exist");
+                            blocked_tx_node.count += 1;
+
+                            // If this transaction was previously unblocked, remove it from the
+                            // unblocked set.
+                            currently_unblocked.remove(&blocked_tx);
                         }
                     }
                     Entry::Vacant(entry) => {
@@ -114,14 +125,18 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             for write_resource in tx.write_locked_resources() {
                 match graph.locks.entry(*write_resource) {
                     Entry::Occupied(mut entry) => {
-                        if let Some(blocking_txs) = entry.get_mut().add_write(id) {
-                            incoming_edges_count += blocking_txs.len();
-                            for blocking_tx in blocking_txs {
-                                let node = graph
+                        if let Some(blocked_txs) = entry.get_mut().add_write(id) {
+                            for blocked_tx in blocked_txs {
+                                node.edges.push(blocked_tx);
+                                let blocked_tx_node = graph
                                     .nodes
-                                    .get_mut(&blocking_tx)
-                                    .expect("blocking_tx must exist");
-                                node.edges.push(id);
+                                    .get_mut(&blocked_tx)
+                                    .expect("blocked_tx must exist");
+                                blocked_tx_node.count += 1;
+
+                                // If this transaction was previously unblocked, remove it from the
+                                // unblocked set.
+                                currently_unblocked.remove(&blocked_tx);
                             }
                         }
                     }
@@ -132,20 +147,10 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 }
             }
 
-            graph.nodes.insert(
-                id,
-                GraphNode {
-                    edges: vec![],
-                    count: incoming_edges_count,
-                },
-            );
-
-            // If no incoming edges, this transaction is unblocked.
-            if incoming_edges_count == 0 {
-                graph.main_queue.push(id);
-            }
+            graph.nodes.insert(id, node);
         }
 
+        graph.main_queue.extend(currently_unblocked);
         graph
     }
 
@@ -233,7 +238,8 @@ mod tests {
             }
         }
 
-        priority_ordered_ids.sort_by_key(|id| std::cmp::Reverse(*id));
+        // Sort in reverse priority order - lowest priority first.
+        priority_ordered_ids.sort();
 
         (transaction_lookup_table, priority_ordered_ids)
     }
