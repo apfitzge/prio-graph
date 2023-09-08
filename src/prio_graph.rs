@@ -2,6 +2,7 @@
 //! edges.
 //!
 use std::{
+    cmp::Ordering,
     collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
     fmt::{Debug, Display},
     hash::Hash,
@@ -126,11 +127,19 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                             currently_unblocked.remove(&blocked_tx);
 
                             // Update the chain for the current node.
-                            chain = Some(
-                                chain
-                                    .map(|chain| chain.min(blocked_tx_node.chain))
-                                    .unwrap_or(blocked_tx_node.chain),
-                            );
+                            match &mut chain {
+                                Some(chain) => match (*chain).cmp(&blocked_tx_node.chain) {
+                                    Ordering::Less => {
+                                        graph.distinct_chains.remove(&blocked_tx_node.chain);
+                                    }
+                                    Ordering::Equal => {}
+                                    Ordering::Greater => {
+                                        graph.distinct_chains.remove(chain);
+                                        *chain = blocked_tx_node.chain;
+                                    }
+                                },
+                                None => chain = Some(blocked_tx_node.chain),
+                            }
 
                             // Add edges out of current node, update the total blocked count.
                             if node.edges.insert(blocked_tx) {
@@ -161,11 +170,20 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                                 currently_unblocked.remove(&blocked_tx);
 
                                 // Update the chain for the current node.
-                                chain = Some(
-                                    chain
-                                        .map(|chain| chain.min(blocked_tx_node.chain))
-                                        .unwrap_or(blocked_tx_node.chain),
-                                );
+                                match &mut chain {
+                                    Some(chain) => match (*chain).cmp(&blocked_tx_node.chain) {
+                                        Ordering::Less => {
+                                            graph.distinct_chains.remove(&blocked_tx_node.chain);
+                                        }
+                                        Ordering::Equal => {}
+                                        Ordering::Greater => {
+                                            graph.distinct_chains.remove(chain);
+                                            *chain = blocked_tx_node.chain;
+                                        }
+                                    },
+                                    None => chain = Some(blocked_tx_node.chain),
+                                }
+
                                 // Add edges out of current node, update the total blocked count.
                                 if node.edges.insert(blocked_tx) {
                                     blocked_tx_node.blocked_by_count += 1;
@@ -184,6 +202,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             // If we didn't find any edges, this is a new chain.
             node.chain = chain.unwrap_or_else(|| {
                 let chain = next_chain_id;
+                graph.distinct_chains.insert(chain);
                 next_chain_id += 1;
                 chain
             });
@@ -193,6 +212,11 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
 
         graph.main_queue.extend(currently_unblocked);
         graph
+    }
+
+    /// Returns the number of distinct chains in the graph.
+    pub fn distinct_chains(&self) -> usize {
+        self.distinct_chains.len()
     }
 
     /// Steps the graph forward by one iteration.
@@ -296,6 +320,7 @@ mod tests {
         let (transaction_lookup_table, transaction_queue) =
             setup_test([(vec![3, 2, 1], vec![], vec![0])]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert_eq!(graph.distinct_chains(), 1);
         let batches = graph.natural_batches();
         assert_eq!(batches, [[3], [2], [1]]);
     }
@@ -314,6 +339,7 @@ mod tests {
         ]);
 
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert_eq!(graph.distinct_chains(), 3);
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7, 6], vec![5, 4], vec![3, 2], vec![1]]);
     }
@@ -333,6 +359,7 @@ mod tests {
             (vec![2, 1], vec![], vec![0, 1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert_eq!(graph.distinct_chains(), 1);
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6, 5], vec![4, 3], vec![2], vec![1]]);
     }
@@ -352,6 +379,7 @@ mod tests {
             (vec![4, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert_eq!(graph.distinct_chains(), 1);
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6], vec![5], vec![4, 2], vec![3, 1]]);
     }
@@ -371,6 +399,7 @@ mod tests {
             (vec![7, 6, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert_eq!(graph.distinct_chains(), 1);
         let batches = graph.natural_batches();
         assert_eq!(
             batches,
@@ -398,6 +427,7 @@ mod tests {
             (vec![7, 5, 3, 1], vec![0], vec![2]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert_eq!(graph.distinct_chains(), 2);
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
     }
