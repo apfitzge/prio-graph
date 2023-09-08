@@ -201,4 +201,23 @@ mod tests {
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7, 6], vec![5, 4], vec![3, 2], vec![1]]);
     }
+
+    #[test]
+    fn joining_queues() {
+        // Setup:
+        // 6 -> 3
+        //        \
+        //          -> 2 -> 1
+        //        /
+        // 5 -> 4
+        // batches: [6, 5], [3, 4], [2], [1]
+        let (transaction_lookup_table, transaction_queue) = setup_test([
+            (vec![6, 3], vec![0]),
+            (vec![5, 4], vec![1]),
+            (vec![2, 1], vec![0, 1]),
+        ]);
+        let mut graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        let batches = graph.natural_batches();
+        assert_eq!(batches, [vec![6, 5], vec![4, 3], vec![2], vec![1]]);
+    }
 }
