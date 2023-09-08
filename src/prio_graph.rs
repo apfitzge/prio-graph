@@ -69,9 +69,12 @@ impl<Id: PriorityId> LockKind<Id> {
 
 struct GraphNode<Id: PriorityId> {
     /// Unique edges from this node.
+    /// The number of edges is the same as the number of forks.
     edges: HashSet<Id>,
     /// Number of edges into this node.
-    count: usize,
+    blocked_by_count: usize,
+    /// Total number of blocked transactions behind this node.
+    total_blocked_count: usize,
 }
 
 impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
@@ -93,7 +96,8 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 .expect("transaction not found");
             let mut node = GraphNode {
                 edges: HashSet::new(),
-                count: 0,
+                blocked_by_count: 0,
+                total_blocked_count: 0,
             };
 
             // Add id into currently unblocked set. It will be removed later if something blocks it.
@@ -103,16 +107,19 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 match graph.locks.entry(*read_resource) {
                     Entry::Occupied(mut entry) => {
                         if let Some(blocked_tx) = entry.get_mut().add_read(id) {
-                            node.edges.insert(blocked_tx);
                             let blocked_tx_node = graph
                                 .nodes
                                 .get_mut(&blocked_tx)
                                 .expect("blocked_tx must exist");
-                            blocked_tx_node.count += 1;
-
+                            blocked_tx_node.blocked_by_count += 1;
                             // If this transaction was previously unblocked, remove it from the
                             // unblocked set.
                             currently_unblocked.remove(&blocked_tx);
+
+                            // Add edges out of current node, update the total blocked count.
+                            if node.edges.insert(blocked_tx) {
+                                node.total_blocked_count += blocked_tx_node.total_blocked_count;
+                            }
                         }
                     }
                     Entry::Vacant(entry) => {
@@ -127,16 +134,19 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                     Entry::Occupied(mut entry) => {
                         if let Some(blocked_txs) = entry.get_mut().add_write(id) {
                             for blocked_tx in blocked_txs {
-                                node.edges.insert(blocked_tx);
                                 let blocked_tx_node = graph
                                     .nodes
                                     .get_mut(&blocked_tx)
                                     .expect("blocked_tx must exist");
-                                blocked_tx_node.count += 1;
-
+                                blocked_tx_node.blocked_by_count += 1;
                                 // If this transaction was previously unblocked, remove it from the
                                 // unblocked set.
                                 currently_unblocked.remove(&blocked_tx);
+
+                                // Add edges out of current node, update the total blocked count.
+                                if node.edges.insert(blocked_tx) {
+                                    node.total_blocked_count += blocked_tx_node.total_blocked_count;
+                                }
                             }
                         }
                     }
@@ -172,9 +182,9 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                         .nodes
                         .get_mut(blocked_tx)
                         .expect("blocked_tx must exist");
-                    blocked_tx_node.count -= 1;
+                    blocked_tx_node.blocked_by_count -= 1;
 
-                    if blocked_tx_node.count == 0 {
+                    if blocked_tx_node.blocked_by_count == 0 {
                         self.main_queue.push(*blocked_tx);
                     }
                 }
