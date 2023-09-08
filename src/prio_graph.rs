@@ -174,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn simple_queue() {
+    fn test_simple_queue() {
         // Setup:
         // 3 -> 2 -> 1
         // batches: [3], [2], [1]
@@ -185,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_separate_queues() {
+    fn test_multiple_separate_queues() {
         // Setup:
         // 8 -> 4 -> 2 -> 1
         // 7 -> 5 -> 3
@@ -203,7 +203,7 @@ mod tests {
     }
 
     #[test]
-    fn joining_queues() {
+    fn test_joining_queues() {
         // Setup:
         // 6 -> 3
         //        \
@@ -222,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn forking_queues() {
+    fn test_forking_queues() {
         // Setup:
         //         -> 2 -> 1
         //        /
