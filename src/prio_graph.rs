@@ -107,7 +107,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 // Add edges out of current node, update the total blocked count.
                 if node.edges.insert(blocked_tx) {
                     blocked_tx_node.blocked_by_count += 1;
-                    node.total_blocked_count += blocked_tx_node.total_blocked_count;
+                    node.total_blocked_count += 1 + blocked_tx_node.total_blocked_count;
                 }
             };
 
