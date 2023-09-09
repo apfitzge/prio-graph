@@ -1,4 +1,4 @@
-use crate::{priority_id::PriorityId, resource_key::ResourceKey};
+use crate::{PriorityId, ResourceKey};
 
 pub enum AccessKind {
     Read,
