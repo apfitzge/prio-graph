@@ -64,8 +64,6 @@ pub struct GraphNode<Id: PriorityId> {
     edges: HashSet<Id>,
     /// Number of edges into this node.
     blocked_by_count: usize,
-    /// Total number of blocked transactions behind this node.
-    total_blocked_count: usize,
 }
 
 impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
@@ -89,7 +87,6 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             let mut node = GraphNode {
                 edges: HashSet::new(),
                 blocked_by_count: 0,
-                total_blocked_count: 0,
             };
 
             // Add id into currently unblocked set. It will be removed later if something blocks it.
@@ -107,7 +104,6 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
                 // Add edges out of current node, update the total blocked count.
                 if node.edges.insert(blocked_tx) {
                     blocked_tx_node.blocked_by_count += 1;
-                    node.total_blocked_count += 1 + blocked_tx_node.total_blocked_count;
                 }
             };
 
