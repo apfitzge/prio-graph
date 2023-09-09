@@ -145,6 +145,11 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
         graph
     }
 
+    /// Returns true if the top-of-queue is empty.
+    pub fn is_empty(&self) -> bool {
+        self.main_queue.is_empty()
+    }
+
     /// Callback controlled iteration through current top-level of the graph.
     pub fn iterate<Selector: FnMut(Id, &GraphNode<Id>) -> Selection>(
         &mut self,
@@ -304,6 +309,7 @@ mod tests {
         ]);
 
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert!(!graph.is_empty());
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7, 6], vec![5, 4], vec![3, 2], vec![1]]);
     }
@@ -323,6 +329,7 @@ mod tests {
             (vec![2, 1], vec![], vec![0, 1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert!(!graph.is_empty());
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6, 5], vec![4, 3], vec![2], vec![1]]);
     }
@@ -342,6 +349,7 @@ mod tests {
             (vec![4, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert!(!graph.is_empty());
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6], vec![5], vec![4, 2], vec![3, 1]]);
     }
@@ -361,6 +369,7 @@ mod tests {
             (vec![7, 6, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert!(!graph.is_empty());
         let batches = graph.natural_batches();
         assert_eq!(
             batches,
@@ -388,6 +397,7 @@ mod tests {
             (vec![7, 5, 3, 1], vec![0], vec![2]),
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert!(!graph.is_empty());
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
     }
@@ -408,6 +418,7 @@ mod tests {
             (vec![8, 7, 6, 5], vec![], vec![2]),
         ]);
         let mut graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert!(!graph.is_empty());
 
         let account_write_locks = RefCell::new(HashMap::new());
         let scheduled = RefCell::new(Vec::new());
@@ -454,5 +465,6 @@ mod tests {
 
         graph.iterate(selector);
         assert_eq!(*scheduled.borrow(), vec![5, 1]);
+        assert!(graph.is_empty());
     }
 }
