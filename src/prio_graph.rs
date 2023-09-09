@@ -227,7 +227,6 @@ mod tests {
     use {super::*, std::cell::RefCell};
 
     pub type TxId = u64;
-    impl PriorityId for TxId {}
 
     pub type Account = u64;
 
