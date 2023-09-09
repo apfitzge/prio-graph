@@ -3,7 +3,7 @@
 //!
 
 use {
-    crate::{selection::Selection, AccessKind, PriorityId, ResourceKey, Transaction},
+    crate::{selection::Selection, AccessKind, PriorityId, ResourceKey, SelectKind, Transaction},
     std::{
         cmp::Ordering,
         collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
@@ -199,10 +199,10 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id,
             } = selector(top_level_id.id, node);
 
             // Node was selected, we must unblock the transactions it was blocking.
-            if selected {
-                self.remove_transaction(&top_level_id.id);
-            } else {
-                add_back.push(top_level_id);
+            match selected {
+                SelectKind::Unselected => add_back.push(top_level_id),
+                SelectKind::SelectedNoBlock => self.remove_transaction(&top_level_id.id),
+                SelectKind::SelectedBlock => {}
             }
 
             if !continue_iterating {
@@ -242,8 +242,11 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id,
     ///
     /// Panics:
     ///     - If the node.blocked_by_count != 0
-    fn remove_transaction(&mut self, id: &Id) {
-        let node = self.nodes.remove(id).expect("id must exist");
+    pub fn remove_transaction(&mut self, id: &Id) {
+        // If the node is already removed, do nothing.
+        let Some(node) = self.nodes.remove(id) else {
+            return;
+        };
         assert_eq!(node.blocked_by_count, 0, "node must be unblocked");
 
         // Unblock transactions that were blocked by this node.
@@ -581,7 +584,11 @@ mod tests {
             }
 
             Selection {
-                selected: can_schedule,
+                selected: if can_schedule {
+                    SelectKind::SelectedNoBlock
+                } else {
+                    SelectKind::Unselected
+                },
                 continue_iterating: true,
             }
         };
