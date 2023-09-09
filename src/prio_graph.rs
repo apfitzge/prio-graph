@@ -86,11 +86,11 @@ impl<Id: PriorityId> LockKind<Id> {
 pub struct GraphNode<Id: PriorityId> {
     /// Unique edges from this node.
     /// The number of edges is the same as the number of forks.
-    edges: HashSet<Id>,
+    pub edges: HashSet<Id>,
     /// Reward at next level - i.e. how much is blocked by this.
-    next_level_rewards: u64,
+    pub next_level_rewards: u64,
     /// Number of edges into this node.
-    blocked_by_count: usize,
+    pub blocked_by_count: usize,
 }
 
 impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id, Rk, Pfn> {
