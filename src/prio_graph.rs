@@ -2,10 +2,8 @@
 //! edges.
 //!
 
-use crate::AccessKind;
-
 use {
-    crate::{selection::Selection, PriorityId, ResourceKey, Transaction},
+    crate::{selection::Selection, AccessKind, PriorityId, ResourceKey, Transaction},
     std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
