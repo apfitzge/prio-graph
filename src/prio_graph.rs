@@ -242,6 +242,10 @@ mod tests {
             self.id
         }
 
+        fn reward(&self) -> u64 {
+            1
+        }
+
         fn check_resource_keys<F: FnMut(&Account, AccessKind)>(&self, mut checker: F) {
             for account in &self.read_locked_resources {
                 checker(account, AccessKind::Read);
