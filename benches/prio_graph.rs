@@ -122,6 +122,7 @@ fn bench_prio_graph_build_and_consume(
         let prio_graph = test::black_box(PrioGraph::new(
             &transaction_lookup_table,
             ids.iter().cloned(),
+            |id, _| id.priority,
         ));
         let _batches = test::black_box(prio_graph.natural_batches());
     });
