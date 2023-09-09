@@ -230,7 +230,6 @@ mod tests {
     impl PriorityId for TxId {}
 
     pub type Account = u64;
-    impl ResourceKey for Account {}
 
     pub struct Tx {
         id: TxId,
