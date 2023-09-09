@@ -62,6 +62,8 @@ pub struct GraphNode<Id: PriorityId> {
     /// Unique edges from this node.
     /// The number of edges is the same as the number of forks.
     edges: HashSet<Id>,
+    /// Reward at next level - i.e. how much is blocked by this.
+    next_level_rewards: u64,
     /// Number of edges into this node.
     blocked_by_count: usize,
 }
@@ -86,6 +88,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
             // TODO: Resizing edges is expensive. We might be better off with an adjacency list.
             let mut node = GraphNode {
                 edges: HashSet::new(),
+                next_level_rewards: 0,
                 blocked_by_count: 0,
             };
 
@@ -103,6 +106,10 @@ impl<'a, Id: PriorityId, Rk: ResourceKey> PrioGraph<Id, Rk> {
 
                 // Add edges out of current node, update the total blocked count.
                 if node.edges.insert(blocked_tx) {
+                    node.next_level_rewards += transaction_lookup_table
+                        .get(&blocked_tx)
+                        .expect("blocked_tx must exist")
+                        .reward();
                     blocked_tx_node.blocked_by_count += 1;
                 }
             };
@@ -242,6 +249,10 @@ mod tests {
             self.id
         }
 
+        fn reward(&self) -> u64 {
+            1
+        }
+
         fn check_resource_keys<F: FnMut(&Account, AccessKind)>(&self, mut checker: F) {
             for account in &self.read_locked_resources {
                 checker(account, AccessKind::Read);
@@ -287,6 +298,16 @@ mod tests {
         let (transaction_lookup_table, transaction_queue) =
             setup_test([(vec![3, 2, 1], vec![], vec![0])]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
+        assert!(!graph.is_empty());
+        for (expected_next_level_reward, ids) in [(1, vec![3, 2]), (0, vec![1])] {
+            for id in ids {
+                assert_eq!(
+                    graph.nodes.get(&id).unwrap().next_level_rewards,
+                    expected_next_level_reward
+                );
+            }
+        }
+
         let batches = graph.natural_batches();
         assert_eq!(batches, [[3], [2], [1]]);
     }
@@ -306,6 +327,15 @@ mod tests {
 
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         assert!(!graph.is_empty());
+        for (expected_next_level_reward, ids) in [(1, vec![8, 7, 5, 4, 2]), (0, vec![6, 3, 1])] {
+            for id in ids {
+                assert_eq!(
+                    graph.nodes.get(&id).unwrap().next_level_rewards,
+                    expected_next_level_reward
+                );
+            }
+        }
+
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7, 6], vec![5, 4], vec![3, 2], vec![1]]);
     }
@@ -326,6 +356,15 @@ mod tests {
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         assert!(!graph.is_empty());
+        for (expected_next_level_reward, ids) in [(1, vec![6, 5, 4, 3, 2]), (0, vec![1])] {
+            for id in ids {
+                assert_eq!(
+                    graph.nodes.get(&id).unwrap().next_level_rewards,
+                    expected_next_level_reward
+                );
+            }
+        }
+
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6, 5], vec![4, 3], vec![2], vec![1]]);
     }
@@ -346,6 +385,16 @@ mod tests {
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         assert!(!graph.is_empty());
+        for (expected_next_level_reward, ids) in [(2, vec![5]), (1, vec![6, 4, 2]), (0, vec![3, 1])]
+        {
+            for id in ids {
+                assert_eq!(
+                    graph.nodes.get(&id).unwrap().next_level_rewards,
+                    expected_next_level_reward
+                );
+            }
+        }
+
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6], vec![5], vec![4, 2], vec![3, 1]]);
     }
@@ -366,6 +415,17 @@ mod tests {
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         assert!(!graph.is_empty());
+        for (expected_next_level_reward, ids) in
+            [(2, vec![8, 4]), (1, vec![9, 7, 6, 5, 2]), (0, vec![3, 1])]
+        {
+            for id in ids {
+                assert_eq!(
+                    graph.nodes.get(&id).unwrap().next_level_rewards,
+                    expected_next_level_reward
+                );
+            }
+        }
+
         let batches = graph.natural_batches();
         assert_eq!(
             batches,
@@ -394,6 +454,15 @@ mod tests {
         ]);
         let graph = PrioGraph::new(&transaction_lookup_table, transaction_queue);
         assert!(!graph.is_empty());
+        for (expected_next_level_reward, ids) in [(1, vec![8, 7, 6, 5, 4, 3]), (0, vec![2, 1])] {
+            for id in ids {
+                assert_eq!(
+                    graph.nodes.get(&id).unwrap().next_level_rewards,
+                    expected_next_level_reward
+                );
+            }
+        }
+
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
     }

@@ -50,6 +50,10 @@ impl Transaction<TransactionPriorityId, AccountKey> for TestTransaction {
         self.id
     }
 
+    fn reward(&self) -> u64 {
+        self.id.priority
+    }
+
     fn check_resource_keys<F: FnMut(&AccountKey, AccessKind)>(&self, mut checker: F) {
         for account in &self.read_accounts {
             checker(account, AccessKind::Read);
