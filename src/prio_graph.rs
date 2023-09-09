@@ -201,7 +201,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id,
             // Node was selected, we must unblock the transactions it was blocking.
             match selected {
                 SelectKind::Unselected => add_back.push(top_level_id),
-                SelectKind::SelectedNoBlock => self.remove_transaction(&top_level_id.id),
+                SelectKind::SelectedNoBlock => assert!(self.remove_transaction(&top_level_id.id)),
                 SelectKind::SelectedBlock => {}
             }
 
@@ -239,13 +239,14 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id,
 
     /// Remove a top-level transaction.
     /// This will unblock transactions that were blocked by this transaction.
+    /// Returns true if the transaction was removed.
     ///
     /// Panics:
     ///     - If the node.blocked_by_count != 0
-    pub fn remove_transaction(&mut self, id: &Id) {
+    pub fn remove_transaction(&mut self, id: &Id) -> bool {
         // If the node is already removed, do nothing.
         let Some(node) = self.nodes.remove(id) else {
-            return;
+            return false;
         };
         assert_eq!(node.blocked_by_count, 0, "node must be unblocked");
 
@@ -261,6 +262,8 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id,
                 self.main_queue.push(self.create_top_level_id(*blocked_tx));
             }
         }
+
+        true
     }
 
     fn create_top_level_id(&self, id: Id) -> TopLevelId<Id> {
