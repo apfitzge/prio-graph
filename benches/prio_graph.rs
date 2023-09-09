@@ -3,7 +3,7 @@
 extern crate test;
 
 use {
-    prio_graph::{AccessKind, PrioGraph, PriorityId, Transaction},
+    prio_graph::{AccessKind, PrioGraph, Transaction},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{collections::HashMap, fmt::Display},
     test::Bencher,
@@ -35,8 +35,6 @@ impl Display for TransactionPriorityId {
         write!(f, "(id: {}, prio: {})", self.id, self.priority)
     }
 }
-
-impl PriorityId for TransactionPriorityId {}
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 struct AccountKey([u8; 32]);
