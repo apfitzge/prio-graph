@@ -3,7 +3,12 @@
 extern crate test;
 
 use {
-    prio_graph::{AccessKind, PrioGraph, PriorityId, ResourceKey, Transaction},
+    prio_graph::{
+        prio_graph::PrioGraph,
+        priority_id::PriorityId,
+        resource_key::ResourceKey,
+        transaction::{AccessKind, Transaction},
+    },
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{collections::HashMap, fmt::Display},
     test::Bencher,
