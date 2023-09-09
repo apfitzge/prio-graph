@@ -3,12 +3,7 @@
 //!
 
 use {
-    crate::{
-        priority_id::PriorityId,
-        resource_key::ResourceKey,
-        selection::Selection,
-        transaction::{AccessKind, Transaction},
-    },
+    crate::{selection::Selection, AccessKind, PriorityId, ResourceKey, Transaction},
     std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
