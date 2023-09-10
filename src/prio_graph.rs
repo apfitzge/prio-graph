@@ -335,7 +335,7 @@ mod tests {
 
     fn create_lookup_iterator<'a>(
         transaction_lookup_table: &'a HashMap<TxId, Tx>,
-        reverse_priority_order_ids: &'a Vec<TxId>,
+        reverse_priority_order_ids: &'a [TxId],
     ) -> impl Iterator<Item = (TxId, &'a Tx)> + 'a {
         reverse_priority_order_ids.iter().map(|id| {
             (
