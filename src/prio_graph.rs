@@ -87,16 +87,17 @@ pub struct GraphNode<Id: PriorityId> {
     /// Unique edges from this node.
     /// The number of edges is the same as the number of forks.
     pub edges: HashSet<Id>,
+    /// Cache the reward for this node.
+    pub reward: u64,
     /// Reward at next level - i.e. how much is blocked by this.
     pub next_level_rewards: u64,
     /// Number of edges into this node.
     pub blocked_by_count: usize,
 }
 
-impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id, Rk, Pfn> {
-    pub fn new<Tx: Transaction<Id, Rk>>(
-        transaction_lookup_table: &'a HashMap<Id, Tx>,
-        reverse_priority_ordered_ids: impl IntoIterator<Item = Id>,
+impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id, Rk, Pfn> {
+    pub fn new<'a, Tx: Transaction<Id, Rk> + 'a>(
+        reverse_priority_ordered_ids_and_txs: impl Iterator<Item = (Id, &'a Tx)>,
         top_level_prioritization_fn: Pfn,
     ) -> Self {
         let mut graph = PrioGraph {
@@ -108,13 +109,11 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id,
 
         let mut currently_unblocked = HashSet::new();
 
-        for id in reverse_priority_ordered_ids {
-            let tx = transaction_lookup_table
-                .get(&id)
-                .expect("transaction not found");
+        for (id, tx) in reverse_priority_ordered_ids_and_txs {
             // TODO: Resizing edges is expensive. We might be better off with an adjacency list.
             let mut node = GraphNode {
                 edges: HashSet::new(),
+                reward: tx.reward(),
                 next_level_rewards: 0,
                 blocked_by_count: 0,
             };
@@ -133,10 +132,7 @@ impl<'a, Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id,
 
                 // Add edges out of current node, update the total blocked count.
                 if node.edges.insert(blocked_tx) {
-                    node.next_level_rewards += transaction_lookup_table
-                        .get(&blocked_tx)
-                        .expect("blocked_tx must exist")
-                        .reward();
+                    node.next_level_rewards += blocked_tx_node.reward;
                     blocked_tx_node.blocked_by_count += 1;
                 }
             };
@@ -337,6 +333,18 @@ mod tests {
         (transaction_lookup_table, priority_ordered_ids)
     }
 
+    fn create_lookup_iterator<'a>(
+        transaction_lookup_table: &'a HashMap<TxId, Tx>,
+        reverse_priority_order_ids: &'a Vec<TxId>,
+    ) -> impl Iterator<Item = (TxId, &'a Tx)> + 'a {
+        reverse_priority_order_ids.iter().map(|id| {
+            (
+                *id,
+                transaction_lookup_table.get(id).expect("id must exist"),
+            )
+        })
+    }
+
     fn test_top_level_priority_fn(id: TxId, _next_level_rewards: u64) -> u64 {
         id
     }
@@ -349,8 +357,7 @@ mod tests {
         let (transaction_lookup_table, transaction_queue) =
             setup_test([(vec![3, 2, 1], vec![], vec![0])]);
         let graph = PrioGraph::new(
-            &transaction_lookup_table,
-            transaction_queue,
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
         assert!(!graph.is_empty());
@@ -381,8 +388,7 @@ mod tests {
         ]);
 
         let graph = PrioGraph::new(
-            &transaction_lookup_table,
-            transaction_queue,
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
         assert!(!graph.is_empty());
@@ -414,8 +420,7 @@ mod tests {
             (vec![2, 1], vec![], vec![0, 1]),
         ]);
         let graph = PrioGraph::new(
-            &transaction_lookup_table,
-            transaction_queue,
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
         assert!(!graph.is_empty());
@@ -447,8 +452,7 @@ mod tests {
             (vec![4, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(
-            &transaction_lookup_table,
-            transaction_queue,
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
         assert!(!graph.is_empty());
@@ -481,8 +485,7 @@ mod tests {
             (vec![7, 6, 3], vec![], vec![1]),
         ]);
         let graph = PrioGraph::new(
-            &transaction_lookup_table,
-            transaction_queue,
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
         assert!(!graph.is_empty());
@@ -524,8 +527,7 @@ mod tests {
             (vec![7, 5, 3, 1], vec![0], vec![2]),
         ]);
         let graph = PrioGraph::new(
-            &transaction_lookup_table,
-            transaction_queue,
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
         assert!(!graph.is_empty());
@@ -558,8 +560,7 @@ mod tests {
             (vec![8, 7, 6, 5], vec![], vec![2]),
         ]);
         let mut graph = PrioGraph::new(
-            &transaction_lookup_table,
-            transaction_queue,
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
         assert!(!graph.is_empty());
