@@ -1,4 +1,4 @@
-# prio-graph
+# prio-graph ![example workflow](https://github.com/apfitzge/prio-graph/actions/workflows/rust.yml/badge.svg)
 
 Provides an interface for building a directed acyclic graph from prioritized transactions that lock resources.
 An edge from a node is only present for the next-highest priority conflicts for a particular resource.
