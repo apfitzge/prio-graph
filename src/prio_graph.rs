@@ -14,7 +14,7 @@ use {
 /// that node is the next-highest priority node for a particular resource.
 /// Resources can be either read or write locked with write locks being
 /// exclusive.
-pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> {
+pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> {
     /// Locked resources and which transaction holds them.
     locks: HashMap<Rk, LockKind<Id>>,
     /// Graph edges and count of edges into each node. The count is used
@@ -95,7 +95,7 @@ pub struct GraphNode<Id: PriorityId> {
     pub blocked_by_count: usize,
 }
 
-impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id, Rk, Pfn> {
+impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioGraph<Id, Rk, Pfn> {
     pub fn new<'a, Tx: Transaction<Id, Rk> + 'a>(
         reverse_priority_ordered_ids_and_txs: impl Iterator<Item = (Id, &'a Tx)>,
         top_level_prioritization_fn: Pfn,
@@ -265,10 +265,7 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(Id, u64) -> u64> PrioGraph<Id, Rk,
     fn create_top_level_id(&self, id: Id) -> TopLevelId<Id> {
         TopLevelId {
             id,
-            priority: (self.top_level_prioritization_fn)(
-                id,
-                self.nodes.get(&id).unwrap().next_level_rewards,
-            ),
+            priority: (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap()),
         }
     }
 }
@@ -345,8 +342,8 @@ mod tests {
         })
     }
 
-    fn test_top_level_priority_fn(id: TxId, _next_level_rewards: u64) -> u64 {
-        id
+    fn test_top_level_priority_fn(id: &TxId, _node: &GraphNode<TxId>) -> u64 {
+        *id
     }
 
     #[test]
