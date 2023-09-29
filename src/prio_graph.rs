@@ -3,8 +3,12 @@
 //!
 
 use {
-    crate::{selection::Selection, AccessKind, PriorityId, ResourceKey, SelectKind, Transaction},
+    crate::{
+        graph_node::GraphNode, lock_kind::LockKind, selection::Selection, AccessKind, PriorityId,
+        ResourceKey, SelectKind, Transaction,
+    },
     std::{
+        cell::RefCell,
         cmp::Ordering,
         collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
     },
@@ -14,7 +18,16 @@ use {
 /// that node is the next-highest priority node for a particular resource.
 /// Resources can be either read or write locked with write locks being
 /// exclusive.
-pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> {
+pub struct PrioGraph<
+    'a,
+    Id: PriorityId,
+    Rk: ResourceKey,
+    Tx: Transaction<Id, Rk> + 'a,
+    Txs: Iterator<Item = (Id, &'a Tx)> + 'a,
+    Pfn: Fn(&Id, &GraphNode<Id>) -> u64,
+> {
+    /// Iterator over transactions and ids
+    iter: Txs,
     /// Locked resources and which transaction holds them.
     locks: HashMap<Rk, LockKind<Id>>,
     /// Graph edges and count of edges into each node. The count is used
@@ -46,138 +59,23 @@ impl<Id: PriorityId> PartialOrd for TopLevelId<Id> {
     }
 }
 
-/// A read-lock can be held by multiple transactions, and
-/// sub-sequent write-locks should be blocked by all of them.
-/// Write-locks are exclusive.
-enum LockKind<Id: PriorityId> {
-    Read(Vec<Id>),
-    Write(Id),
-}
-
-impl<Id: PriorityId> LockKind<Id> {
-    /// Take read-lock on a resource.
-    /// Returns the id of the write transaction that is blocking the added read.
-    pub fn add_read(&mut self, id: Id) -> Option<Id> {
-        match self {
-            LockKind::Read(ids) => {
-                ids.push(id);
-                None
-            }
-            LockKind::Write(_) => {
-                let LockKind::Write(id) = core::mem::replace(self, LockKind::Read(vec![id])) else {
-                    unreachable!("LockKind::Write is guaranteed by match");
-                };
-                Some(id)
-            }
-        }
-    }
-
-    /// Take write-lock on a resource.
-    /// Returns the ids of transactions blocking the added write.
-    pub fn add_write(&mut self, id: Id) -> Option<Vec<Id>> {
-        match core::mem::replace(self, LockKind::Write(id)) {
-            LockKind::Read(ids) => Some(ids),
-            LockKind::Write(id) => Some(vec![id]), // TODO: Remove allocation.
-        }
-    }
-}
-
-/// A node in the priority graph.
-pub struct GraphNode<Id: PriorityId> {
-    /// Unique edges from this node.
-    /// The number of edges is the same as the number of forks.
-    pub edges: HashSet<Id>,
-    /// Cache the reward for this node.
-    pub reward: u64,
-    /// Reward at next level - i.e. how much is blocked by this.
-    pub next_level_rewards: u64,
-    /// Number of edges into this node.
-    pub blocked_by_count: usize,
-}
-
-impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioGraph<Id, Rk, Pfn> {
-    pub fn new<'a, Tx: Transaction<Id, Rk> + 'a>(
-        reverse_priority_ordered_ids_and_txs: impl Iterator<Item = (Id, &'a Tx)>,
-        top_level_prioritization_fn: Pfn,
-    ) -> Self {
-        let mut graph = PrioGraph {
+impl<
+        'a,
+        Id: PriorityId,
+        Rk: ResourceKey,
+        Tx: Transaction<Id, Rk>,
+        Txs: Iterator<Item = (Id, &'a Tx)> + 'a,
+        Pfn: Fn(&Id, &GraphNode<Id>) -> u64,
+    > PrioGraph<'a, Id, Rk, Tx, Txs, Pfn>
+{
+    pub fn new(priority_ordered_ids_and_txs: Txs, top_level_prioritization_fn: Pfn) -> Self {
+        Self {
+            iter: priority_ordered_ids_and_txs,
             locks: HashMap::new(),
             nodes: HashMap::new(),
             main_queue: BinaryHeap::new(),
             top_level_prioritization_fn,
-        };
-
-        let mut currently_unblocked = HashSet::new();
-
-        for (id, tx) in reverse_priority_ordered_ids_and_txs {
-            // TODO: Resizing edges is expensive. We might be better off with an adjacency list.
-            let mut node = GraphNode {
-                edges: HashSet::new(),
-                reward: tx.reward(),
-                next_level_rewards: 0,
-                blocked_by_count: 0,
-            };
-
-            // Add id into currently unblocked set. It will be removed later if something blocks it.
-            currently_unblocked.insert(id);
-
-            let mut block_tx = |blocked_tx: Id| {
-                let blocked_tx_node = graph
-                    .nodes
-                    .get_mut(&blocked_tx)
-                    .expect("blocked_tx must exist");
-                // If this transaction was previously unblocked, remove it from the
-                // unblocked set.
-                currently_unblocked.remove(&blocked_tx);
-
-                // Add edges out of current node, update the total blocked count.
-                if node.edges.insert(blocked_tx) {
-                    node.next_level_rewards += blocked_tx_node.reward;
-                    blocked_tx_node.blocked_by_count += 1;
-                }
-            };
-
-            tx.check_resource_keys(
-                &mut |resource_key: &Rk, access_kind: AccessKind| match graph
-                    .locks
-                    .entry(*resource_key)
-                {
-                    Entry::Vacant(entry) => {
-                        entry.insert(match access_kind {
-                            AccessKind::Read => LockKind::Read(vec![id]),
-                            AccessKind::Write => LockKind::Write(id),
-                        });
-                    }
-                    Entry::Occupied(mut entry) => match access_kind {
-                        AccessKind::Read => {
-                            if let Some(blocked_tx) = entry.get_mut().add_read(id) {
-                                block_tx(blocked_tx);
-                            }
-                        }
-                        AccessKind::Write => {
-                            if let Some(blocked_txs) = entry.get_mut().add_write(id) {
-                                for blocked_tx in blocked_txs {
-                                    block_tx(blocked_tx);
-                                }
-                            }
-                        }
-                    },
-                },
-            );
-            graph.nodes.insert(id, node);
         }
-
-        let top_level_ids: Vec<_> = currently_unblocked
-            .into_iter()
-            .map(|id| graph.create_top_level_id(id))
-            .collect();
-        graph.main_queue.extend(top_level_ids);
-        graph
-    }
-
-    /// Returns true if the top-of-queue is empty.
-    pub fn is_empty(&self) -> bool {
-        self.main_queue.is_empty()
     }
 
     /// Callback controlled iteration through current top-level of the graph.
@@ -185,6 +83,23 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         &mut self,
         mut selector: Selector,
     ) {
+        // First we iterate over nodes in our main queue. These could have been freed between
+        // calls to `iterate`.
+        if self.iterate_main_queue(&mut selector) {
+            return;
+        }
+
+        self.iterate_new_transactions(&mut selector);
+    }
+
+    // Iterates over the main queue nodes
+    // Returns whether iteration should stop here
+    fn iterate_main_queue<Selector: FnMut(Id, &GraphNode<Id>) -> Selection>(
+        &mut self,
+        selector: &mut Selector,
+    ) -> bool {
+        let mut stop_iterating_signal = false;
+
         let mut add_back = vec![];
         while let Some(top_level_id) = self.main_queue.pop() {
             let node = self.nodes.get(&top_level_id.id).expect("id must exist");
@@ -202,11 +117,89 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
             }
 
             if !continue_iterating {
+                stop_iterating_signal = true;
                 break;
             }
         }
 
         self.main_queue.extend(add_back);
+        return stop_iterating_signal;
+    }
+
+    // Iterate over transactions in the passed iterator.
+    fn iterate_new_transactions<Selector: FnMut(Id, &GraphNode<Id>) -> Selection>(
+        &mut self,
+        selector: &mut Selector,
+    ) {
+        while let Some((id, tx)) = self.iter.next() {
+            let mut node = GraphNode {
+                edges: HashSet::new(),
+                reward: tx.reward(),
+                next_level_rewards: 0,
+                blocked_by_count: 0,
+            };
+
+            let mut block_by_tx = |blocking_id: Id| {
+                let Some(blocking_tx_node) = self.nodes.get_mut(&blocking_id) else {
+                    return;
+                };
+                if blocking_tx_node.edges.insert(id) {
+                    blocking_tx_node.next_level_rewards += node.reward;
+                    node.blocked_by_count += 1;
+                }
+            };
+
+            tx.check_resource_keys(&mut |resource_key: &Rk, access_kind: AccessKind| match self
+                .locks
+                .entry(*resource_key)
+            {
+                Entry::Vacant(entry) => {
+                    entry.insert(match access_kind {
+                        AccessKind::Read => LockKind::Read(vec![id]),
+                        AccessKind::Write => LockKind::Write(id),
+                    });
+                }
+                Entry::Occupied(mut entry) => match access_kind {
+                    AccessKind::Read => {
+                        if let Some(blocking_tx) = entry.get_mut().add_read(id) {
+                            block_by_tx(blocking_tx);
+                        }
+                    }
+                    AccessKind::Write => {
+                        if let Some(blocking_txs) = entry.get_mut().add_write(id) {
+                            for blocking_tx in blocking_txs {
+                                block_by_tx(blocking_tx);
+                            }
+                        }
+                    }
+                },
+            });
+
+            let unblocked = node.blocked_by_count == 0;
+            self.nodes.insert(id, node);
+
+            if unblocked {
+                let node = self.nodes.get(&id).expect("id must exist");
+
+                let Selection {
+                    selected,
+                    continue_iterating,
+                } = selector(id, node);
+
+                // Node was selected, we must unblock the transactions it was blocking.
+                match selected {
+                    SelectKind::Unselected => self.main_queue.push(self.create_top_level_id(id)),
+                    SelectKind::SelectedNoBlock => {
+                        assert!(self.remove_transaction(&id))
+                    }
+                    SelectKind::SelectedBlock => {}
+                }
+
+                if !continue_iterating {
+                    break;
+                }
+            }
+        }
     }
 
     /// Steps the graph forward by one iteration.
@@ -217,15 +210,25 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
     pub fn natural_batches(mut self) -> Vec<Vec<Id>> {
         let mut batches = vec![];
 
-        while !self.main_queue.is_empty() {
-            let mut batch = Vec::with_capacity(self.main_queue.len());
-            while let Some(top_level_id) = self.main_queue.pop() {
-                batch.push(top_level_id.id);
+        let mut batch = RefCell::new(vec![]);
+        loop {
+            self.iterate(|id, _node| {
+                batch.get_mut().push(id);
+                Selection {
+                    selected: SelectKind::SelectedBlock,
+                    continue_iterating: true,
+                }
+            });
+
+            let batch = batch.replace(vec![]);
+            if batch.is_empty() {
+                break;
             }
 
-            for id in &batch {
+            // Unblock transactions that were blocked by this batch.
+            batch.iter().for_each(|id| {
                 self.remove_transaction(id);
-            }
+            });
 
             batches.push(batch);
         }
@@ -324,8 +327,8 @@ mod tests {
             }
         }
 
-        // Sort in reverse priority order - lowest priority first.
-        priority_ordered_ids.sort();
+        // Sort in priority order - highest priority first.
+        priority_ordered_ids.sort_by(|a, b| b.cmp(a));
 
         (transaction_lookup_table, priority_ordered_ids)
     }
@@ -357,15 +360,6 @@ mod tests {
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
-        assert!(!graph.is_empty());
-        for (expected_next_level_reward, ids) in [(1, vec![3, 2]), (0, vec![1])] {
-            for id in ids {
-                assert_eq!(
-                    graph.nodes.get(&id).unwrap().next_level_rewards,
-                    expected_next_level_reward
-                );
-            }
-        }
 
         let batches = graph.natural_batches();
         assert_eq!(batches, [[3], [2], [1]]);
@@ -388,15 +382,6 @@ mod tests {
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
-        assert!(!graph.is_empty());
-        for (expected_next_level_reward, ids) in [(1, vec![8, 7, 5, 4, 2]), (0, vec![6, 3, 1])] {
-            for id in ids {
-                assert_eq!(
-                    graph.nodes.get(&id).unwrap().next_level_rewards,
-                    expected_next_level_reward
-                );
-            }
-        }
 
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7, 6], vec![5, 4], vec![3, 2], vec![1]]);
@@ -420,15 +405,6 @@ mod tests {
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
-        assert!(!graph.is_empty());
-        for (expected_next_level_reward, ids) in [(1, vec![6, 5, 4, 3, 2]), (0, vec![1])] {
-            for id in ids {
-                assert_eq!(
-                    graph.nodes.get(&id).unwrap().next_level_rewards,
-                    expected_next_level_reward
-                );
-            }
-        }
 
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6, 5], vec![4, 3], vec![2], vec![1]]);
@@ -452,16 +428,6 @@ mod tests {
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
-        assert!(!graph.is_empty());
-        for (expected_next_level_reward, ids) in [(2, vec![5]), (1, vec![6, 4, 2]), (0, vec![3, 1])]
-        {
-            for id in ids {
-                assert_eq!(
-                    graph.nodes.get(&id).unwrap().next_level_rewards,
-                    expected_next_level_reward
-                );
-            }
-        }
 
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![6], vec![5], vec![4, 2], vec![3, 1]]);
@@ -485,17 +451,6 @@ mod tests {
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
-        assert!(!graph.is_empty());
-        for (expected_next_level_reward, ids) in
-            [(2, vec![8, 4]), (1, vec![9, 7, 6, 5, 2]), (0, vec![3, 1])]
-        {
-            for id in ids {
-                assert_eq!(
-                    graph.nodes.get(&id).unwrap().next_level_rewards,
-                    expected_next_level_reward
-                );
-            }
-        }
 
         let batches = graph.natural_batches();
         assert_eq!(
@@ -527,15 +482,6 @@ mod tests {
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
-        assert!(!graph.is_empty());
-        for (expected_next_level_reward, ids) in [(1, vec![8, 7, 6, 5, 4, 3]), (0, vec![2, 1])] {
-            for id in ids {
-                assert_eq!(
-                    graph.nodes.get(&id).unwrap().next_level_rewards,
-                    expected_next_level_reward
-                );
-            }
-        }
 
         let batches = graph.natural_batches();
         assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
@@ -560,7 +506,6 @@ mod tests {
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
-        assert!(!graph.is_empty());
 
         let account_write_locks = RefCell::new(HashMap::new());
         let scheduled = RefCell::new(Vec::new());
@@ -611,6 +556,5 @@ mod tests {
 
         graph.iterate(selector);
         assert_eq!(*scheduled.borrow(), vec![5, 1]);
-        assert!(graph.is_empty());
     }
 }
