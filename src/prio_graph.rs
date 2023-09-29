@@ -11,6 +11,7 @@ use {
         cell::RefCell,
         cmp::Ordering,
         collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
+        ops::Deref,
     },
 };
 
@@ -19,11 +20,11 @@ use {
 /// Resources can be either read or write locked with write locks being
 /// exclusive.
 pub struct PrioGraph<
-    'a,
     Id: PriorityId,
     Rk: ResourceKey,
-    Tx: Transaction<Id, Rk> + 'a,
-    Txs: Iterator<Item = (Id, &'a Tx)> + 'a,
+    Tx: Transaction<Id, Rk>,
+    TxRef: Deref<Target = Tx>,
+    Txs: Iterator<Item = (Id, TxRef)>,
     Pfn: Fn(&Id, &GraphNode<Id>) -> u64,
 > {
     /// Iterator over transactions and ids
@@ -37,6 +38,8 @@ pub struct PrioGraph<
     main_queue: BinaryHeap<TopLevelId<Id>>,
     /// Priority modification for top-level transactions.
     top_level_prioritization_fn: Pfn,
+
+    _phantom: core::marker::PhantomData<Tx>,
 }
 
 /// An Id that sits at the top of the priority graph.
@@ -60,13 +63,13 @@ impl<Id: PriorityId> PartialOrd for TopLevelId<Id> {
 }
 
 impl<
-        'a,
         Id: PriorityId,
         Rk: ResourceKey,
         Tx: Transaction<Id, Rk>,
-        Txs: Iterator<Item = (Id, &'a Tx)> + 'a,
+        TxRef: Deref<Target = Tx>,
+        Txs: Iterator<Item = (Id, TxRef)>,
         Pfn: Fn(&Id, &GraphNode<Id>) -> u64,
-    > PrioGraph<'a, Id, Rk, Tx, Txs, Pfn>
+    > PrioGraph<Id, Rk, Tx, TxRef, Txs, Pfn>
 {
     pub fn new(priority_ordered_ids_and_txs: Txs, top_level_prioritization_fn: Pfn) -> Self {
         Self {
@@ -75,6 +78,7 @@ impl<
             nodes: HashMap::new(),
             main_queue: BinaryHeap::new(),
             top_level_prioritization_fn,
+            _phantom: core::marker::PhantomData,
         }
     }
 
@@ -132,6 +136,8 @@ impl<
         selector: &mut Selector,
     ) {
         while let Some((id, tx)) = self.iter.next() {
+            let tx = tx.deref();
+
             let mut node = GraphNode {
                 edges: HashSet::new(),
                 reward: tx.reward(),
