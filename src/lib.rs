@@ -1,3 +1,4 @@
+mod lock_kind;
 mod prio_graph;
 mod priority_id;
 mod resource_key;
