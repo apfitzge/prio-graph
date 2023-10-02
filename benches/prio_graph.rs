@@ -119,16 +119,12 @@ fn bench_prio_graph_build_and_consume(
 
     // Begin bench.
     bencher.iter(|| {
-        let prio_graph = test::black_box(PrioGraph::new(
-            ids.iter().cloned().map(|id| {
-                (
-                    id,
-                    transaction_lookup_table.get(&id).expect("id must exist"),
-                )
-            }),
+        let _batches = test::black_box(PrioGraph::natural_batches(
+            ids.iter()
+                .cloned()
+                .map(|id| transaction_lookup_table.get(&id).expect("id must exist")),
             |id, _| id.priority,
         ));
-        let _batches = test::black_box(prio_graph.natural_batches());
     });
 }
 
