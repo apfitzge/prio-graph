@@ -4,8 +4,8 @@
 
 use {
     crate::{
-        lock_kind::LockKind, selection::Selection, AccessKind, PriorityId, ResourceKey, SelectKind,
-        Transaction,
+        lock_kind::LockKind, selection::Selection, AccessKind, GraphNode, PriorityId, ResourceKey,
+        SelectKind, Transaction,
     },
     std::{
         cmp::Ordering,
@@ -47,19 +47,6 @@ impl<Id: PriorityId> PartialOrd for TopLevelId<Id> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
-}
-
-/// A node in the priority graph.
-pub struct GraphNode<Id: PriorityId> {
-    /// Unique edges from this node.
-    /// The number of edges is the same as the number of forks.
-    pub edges: HashSet<Id>,
-    /// Cache the reward for this node.
-    pub reward: u64,
-    /// Reward at next level - i.e. how much is blocked by this.
-    pub next_level_rewards: u64,
-    /// Number of edges into this node.
-    pub blocked_by_count: usize,
 }
 
 impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioGraph<Id, Rk, Pfn> {
