@@ -4,13 +4,10 @@
 
 use {
     crate::{
-        lock_kind::LockKind, selection::Selection, AccessKind, GraphNode, PriorityId, ResourceKey,
-        SelectKind, Transaction,
+        lock_kind::LockKind, selection::Selection, top_level_id::TopLevelId, AccessKind, GraphNode,
+        PriorityId, ResourceKey, SelectKind, Transaction,
     },
-    std::{
-        cmp::Ordering,
-        collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
-    },
+    std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
 /// A directed acyclic graph where edges are only present between nodes if
@@ -27,26 +24,6 @@ pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id
     main_queue: BinaryHeap<TopLevelId<Id>>,
     /// Priority modification for top-level transactions.
     top_level_prioritization_fn: Pfn,
-}
-
-/// An Id that sits at the top of the priority graph.
-/// Priority may be modified from the original based on the number of conflicts.
-#[derive(Eq, PartialEq)]
-struct TopLevelId<Id: PriorityId> {
-    id: Id,
-    priority: u64,
-}
-
-impl<Id: PriorityId> Ord for TopLevelId<Id> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.priority.cmp(&other.priority)
-    }
-}
-
-impl<Id: PriorityId> PartialOrd for TopLevelId<Id> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioGraph<Id, Rk, Pfn> {
