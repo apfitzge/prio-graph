@@ -175,6 +175,14 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         self.main_queue.is_empty()
     }
 
+    /// Returns the chain id for a given node id.
+    ///
+    /// Panics:
+    ///     - Node does not exist.
+    pub fn chain_id(&self, id: &Id) -> u64 {
+        self.nodes.get(id).unwrap().chain_id
+    }
+
     /// Combination of `pop` and `unblock_id`.
     pub fn pop_and_unblock(&mut self) -> Option<Id> {
         let id = self.pop()?;
