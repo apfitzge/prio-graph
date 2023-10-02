@@ -7,7 +7,10 @@ use {
         lock_kind::LockKind, top_level_id::TopLevelId, AccessKind, GraphNode, PriorityId,
         ResourceKey, Transaction,
     },
-    std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
+    std::{
+        cmp::Ordering,
+        collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
+    },
 };
 
 /// A directed acyclic graph where edges are only present between nodes if
@@ -24,6 +27,11 @@ pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id
     main_queue: BinaryHeap<TopLevelId<Id>>,
     /// Priority modification for top-level transactions.
     top_level_prioritization_fn: Pfn,
+
+    /// Used to generate the next distinct chain id.
+    next_chain_id: u64,
+    /// Map from chain id to joined chain.
+    chain_to_joined: HashMap<u64, u64>,
 }
 
 impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioGraph<Id, Rk, Pfn> {
@@ -67,32 +75,56 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
             nodes: HashMap::new(),
             main_queue: BinaryHeap::new(),
             top_level_prioritization_fn,
+            next_chain_id: 0,
+            chain_to_joined: HashMap::new(),
         }
     }
 
     pub fn insert_transaction(&mut self, tx: &impl Transaction<Id, Rk>) {
         let id = tx.id();
         let mut node = GraphNode {
+            active: true,
             edges: HashSet::new(),
             reward: tx.reward(),
             next_level_rewards: 0,
             blocked_by_count: 0,
+            chain_id: self.next_chain_id,
         };
 
-        let mut block_tx = |blocking_id: Id| {
-            let Some(blocked_tx_node) = self.nodes.get_mut(&blocking_id) else {
-                // Node was already removed, so do nothing here.
-                return;
+        let mut joined_chains = HashSet::new();
+
+        // Using a macro since a closure cannot be used.
+        macro_rules! block_tx {
+            ($blocking_id:expr) => {
+                let Some(blocking_tx_node) = self.nodes.get_mut(&$blocking_id) else {
+                    panic!("blocking node must exist");
+                };
+
+                // If the node isn't active then we only do chain tracking.
+                if blocking_tx_node.active {
+                    // Add edges to the current node.
+                    // If it is a unique edge, add the reward to the next_level_rewards,
+                    // and increment the blocked_by_count for the current node.
+                    if blocking_tx_node.edges.insert(id) {
+                        blocking_tx_node.next_level_rewards += node.reward;
+                        node.blocked_by_count += 1;
+                    }
+                }
+                let blocking_chain_id = blocking_tx_node.chain_id;
+                let blocking_chain_id = self.trace_chain(blocking_chain_id);
+
+                match node.chain_id.cmp(&blocking_chain_id) {
+                    Ordering::Less => {
+                        joined_chains.insert(blocking_chain_id);
+                    }
+                    Ordering::Equal => {}
+                    Ordering::Greater => {
+                        joined_chains.insert(node.chain_id);
+                        node.chain_id = blocking_chain_id;
+                    }
+                }
             };
-
-            // Add edges to the current node.
-            // If it is a unique edge, add the reward to the next_level_rewards,
-            // and increment the blocked_by_count for the current node.
-            if blocked_tx_node.edges.insert(id) {
-                blocked_tx_node.next_level_rewards += node.reward;
-                node.blocked_by_count += 1;
-            }
-        };
+        }
 
         tx.check_resource_keys(&mut |resource_key: &Rk, access_kind: AccessKind| match self
             .locks
@@ -107,18 +139,29 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
             Entry::Occupied(mut entry) => match access_kind {
                 AccessKind::Read => {
                     if let Some(blocking_tx) = entry.get_mut().add_read(id) {
-                        block_tx(blocking_tx);
+                        block_tx!(blocking_tx);
                     }
                 }
                 AccessKind::Write => {
                     if let Some(blocking_txs) = entry.get_mut().add_write(id) {
                         for blocking_tx in blocking_txs {
-                            block_tx(blocking_tx);
+                            block_tx!(blocking_tx);
                         }
                     }
                 }
             },
         });
+
+        // If this chain id is distinct, then increment the `next_chain_id`.
+        if node.chain_id == self.next_chain_id {
+            self.next_chain_id += 1;
+        }
+
+        // Add all joining chains into the map.
+        for joining_chain in joined_chains {
+            self.chain_to_joined.insert(joining_chain, node.chain_id);
+        }
+
         self.nodes.insert(id, node);
 
         // If the node is not blocked, add it to the main queue.
@@ -148,16 +191,20 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
     /// This will unblock transactions that were blocked by this transaction.
     ///
     /// Panics:
+    ///     - Node does not exist.
     ///     - If the node.blocked_by_count != 0
     pub fn unblock_id(&mut self, id: &Id) {
         // If the node is already removed, do nothing.
-        let Some(node) = self.nodes.remove(id) else {
-            return;
+        let Some(node) = self.nodes.get_mut(id) else {
+            panic!("node must exist");
         };
         assert_eq!(node.blocked_by_count, 0, "node must be unblocked");
 
+        node.active = true;
+        let edges = core::mem::take(&mut node.edges);
+
         // Unblock transactions that were blocked by this node.
-        for blocked_tx in node.edges.iter() {
+        for blocked_tx in edges.iter() {
             let blocked_tx_node = self
                 .nodes
                 .get_mut(blocked_tx)
@@ -175,6 +222,13 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
             id,
             priority: (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap()),
         }
+    }
+
+    fn trace_chain(&self, mut chain_id: u64) -> u64 {
+        while let Some(joined_chain) = self.chain_to_joined.get(&chain_id) {
+            chain_id = *joined_chain;
+        }
+        chain_id
     }
 }
 
