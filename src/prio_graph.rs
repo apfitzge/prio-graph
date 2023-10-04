@@ -208,7 +208,7 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         };
         assert_eq!(node.blocked_by_count, 0, "node must be unblocked");
 
-        node.active = true;
+        node.active = false;
         let edges = core::mem::take(&mut node.edges);
 
         // Unblock transactions that were blocked by this node.
