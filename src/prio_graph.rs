@@ -41,13 +41,13 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
     /// If any of those transactions are now unblocked, add them to the primary queue.
     /// Repeat until the primary queue is empty.
     pub fn natural_batches<'a>(
-        iter: impl IntoIterator<Item = &'a (impl Transaction<Id, Rk> + 'a)>,
+        iter: impl IntoIterator<Item = (Id, &'a (impl Transaction<Rk> + 'a))>,
         top_level_prioritization_fn: Pfn,
     ) -> Vec<Vec<Id>> {
         // Insert all transactions into the graph.
         let mut graph = PrioGraph::new(top_level_prioritization_fn);
-        for tx in iter.into_iter() {
-            graph.insert_transaction(tx);
+        for (id, tx) in iter.into_iter() {
+            graph.insert_transaction(id, tx);
         }
 
         // Create natural batches by manually popping without unblocking at each level.
@@ -80,13 +80,10 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         }
     }
 
-    pub fn insert_transaction(&mut self, tx: &impl Transaction<Id, Rk>) {
-        let id = tx.id();
+    pub fn insert_transaction(&mut self, id: Id, tx: &impl Transaction<Rk>) {
         let mut node = GraphNode {
             active: true,
             edges: HashSet::new(),
-            reward: tx.reward(),
-            next_level_rewards: 0,
             blocked_by_count: 0,
             chain_id: self.next_chain_id,
         };
@@ -103,10 +100,8 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
                 // If the node isn't active then we only do chain tracking.
                 if blocking_tx_node.active {
                     // Add edges to the current node.
-                    // If it is a unique edge, add the reward to the next_level_rewards,
-                    // and increment the blocked_by_count for the current node.
+                    // If it is a unique edge, increment the blocked_by_count for the current node.
                     if blocking_tx_node.edges.insert(id) {
-                        blocking_tx_node.next_level_rewards += node.reward;
                         node.blocked_by_count += 1;
                     }
                 }
@@ -249,20 +244,11 @@ mod tests {
     pub type Account = u64;
 
     pub struct Tx {
-        id: TxId,
         read_locked_resources: Vec<Account>,
         write_locked_resources: Vec<Account>,
     }
 
-    impl Transaction<TxId, Account> for Tx {
-        fn id(&self) -> TxId {
-            self.id
-        }
-
-        fn reward(&self) -> u64 {
-            1
-        }
-
+    impl Transaction<Account> for Tx {
         fn check_resource_keys<F: FnMut(&Account, AccessKind)>(&self, mut checker: F) {
             for account in &self.read_locked_resources {
                 checker(account, AccessKind::Read);
@@ -286,7 +272,6 @@ mod tests {
                 transaction_lookup_table.insert(
                     *id,
                     Tx {
-                        id: *id,
                         read_locked_resources: read_accounts.clone(),
                         write_locked_resources: write_accounts.clone(),
                     },
@@ -303,10 +288,13 @@ mod tests {
     fn create_lookup_iterator<'a>(
         transaction_lookup_table: &'a HashMap<TxId, Tx>,
         reverse_priority_order_ids: &'a [TxId],
-    ) -> impl Iterator<Item = &'a Tx> + 'a {
-        reverse_priority_order_ids
-            .iter()
-            .map(|id| transaction_lookup_table.get(id).expect("id must exist"))
+    ) -> impl Iterator<Item = (TxId, &'a Tx)> + 'a {
+        reverse_priority_order_ids.iter().map(|id| {
+            (
+                *id,
+                transaction_lookup_table.get(id).expect("id must exist"),
+            )
+        })
     }
 
     fn test_top_level_priority_fn(id: &TxId, _node: &GraphNode<TxId>) -> u64 {
