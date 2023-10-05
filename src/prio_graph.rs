@@ -1,7 +1,3 @@
-//! Structure for representing a priority graph - a graph with prioritized
-//! edges.
-//!
-
 use {
     crate::{
         lock_kind::LockKind, top_level_id::TopLevelId, AccessKind, GraphNode, PriorityId,
@@ -17,6 +13,8 @@ use {
 /// that node is the next-highest priority node for a particular resource.
 /// Resources can be either read or write locked with write locks being
 /// exclusive.
+/// `Transaction`s are inserted into the graph and then popped in time-priority order.
+/// Between conflicting transactions, the first to be inserted will always have higher priority.
 pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> {
     /// Locked resources and which transaction holds them.
     locks: HashMap<Rk, LockKind<Id>>,
@@ -35,11 +33,10 @@ pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id
 }
 
 impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioGraph<Id, Rk, Pfn> {
-    /// Steps the graph forward by one iteration.
-    /// Drains all transactions from the primary queue into a batch.
+    /// Drains all transactions from the main queue into a batch.
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
-    /// If any of those transactions are now unblocked, add them to the primary queue.
-    /// Repeat until the primary queue is empty.
+    /// If any of those transactions are now unblocked, add them to the main queue.
+    /// Repeat until the main queue is empty.
     pub fn natural_batches<'a>(
         iter: impl IntoIterator<Item = (Id, &'a (impl Transaction<Rk> + 'a))>,
         top_level_prioritization_fn: Pfn,
@@ -60,7 +57,7 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
             }
 
             for id in &batch {
-                graph.unblock_id(id);
+                graph.unblock(id);
             }
 
             batches.push(batch);
@@ -69,6 +66,7 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         batches
     }
 
+    /// Create a new priority graph.
     pub fn new(top_level_prioritization_fn: Pfn) -> Self {
         Self {
             locks: HashMap::new(),
@@ -80,6 +78,8 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         }
     }
 
+    /// Insert a transaction into the graph with the given `Id`.
+    /// `Transaction`s should be inserted in priority order.
     pub fn insert_transaction(&mut self, id: Id, tx: &impl Transaction<Rk>) {
         let mut node = GraphNode {
             active: true,
@@ -165,7 +165,7 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         }
     }
 
-    /// Returns true if the top-of-queue is empty.
+    /// Returns true if the main queue is empty.
     pub fn is_empty(&self) -> bool {
         self.main_queue.is_empty()
     }
@@ -178,14 +178,14 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         self.trace_chain(self.nodes.get(id).unwrap().chain_id)
     }
 
-    /// Combination of `pop` and `unblock_id`.
+    /// Combination of `pop` and `unblock`.
     pub fn pop_and_unblock(&mut self) -> Option<Id> {
         let id = self.pop()?;
-        self.unblock_id(&id);
+        self.unblock(&id);
         Some(id)
     }
 
-    /// Pop the highest priority node id from the queue.
+    /// Pop the highest priority node id from the main queue.
     /// Returns None if the queue is empty.
     pub fn pop(&mut self) -> Option<Id> {
         self.main_queue.pop().map(|top_level_id| top_level_id.id)
@@ -196,7 +196,7 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
     /// Panics:
     ///     - Node does not exist.
     ///     - If the node.blocked_by_count != 0
-    pub fn unblock_id(&mut self, id: &Id) {
+    pub fn unblock(&mut self, id: &Id) {
         // If the node is already removed, do nothing.
         let Some(node) = self.nodes.get_mut(id) else {
             panic!("node must exist");
