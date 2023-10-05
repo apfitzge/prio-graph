@@ -5,14 +5,20 @@ extern crate test;
 use {
     prio_graph::{AccessKind, PrioGraph, Transaction},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
-    std::{collections::HashMap, fmt::Display},
+    std::{collections::HashMap, fmt::Display, hash::Hash},
     test::Bencher,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 struct TransactionPriorityId {
     id: u64,
     priority: u64,
+}
+
+impl Hash for TransactionPriorityId {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.id);
+    }
 }
 
 impl Ord for TransactionPriorityId {
