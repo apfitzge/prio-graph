@@ -3,7 +3,7 @@
 extern crate test;
 
 use {
-    prio_graph::{AccessKind, PrioGraph, Transaction},
+    prio_graph::{AccessKind, PrioGraph, TopLevelId, Transaction},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{collections::HashMap, fmt::Display, hash::Hash},
     test::Bencher,
@@ -39,6 +39,12 @@ impl PartialOrd for TransactionPriorityId {
 impl Display for TransactionPriorityId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(id: {}, prio: {})", self.id, self.priority)
+    }
+}
+
+impl TopLevelId<TransactionPriorityId> for TransactionPriorityId {
+    fn id(&self) -> TransactionPriorityId {
+        *self
     }
 }
 
@@ -122,7 +128,7 @@ fn bench_prio_graph_build_and_consume(
                     transaction_lookup_table.get(&id).expect("id must exist"),
                 )
             }),
-            |id, _| id.priority,
+            |id, _| *id,
         ));
     });
 }

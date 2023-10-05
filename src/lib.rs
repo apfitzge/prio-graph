@@ -6,4 +6,6 @@ mod resource_key;
 mod top_level_id;
 mod transaction;
 
-pub use crate::{graph_node::*, prio_graph::*, priority_id::*, resource_key::*, transaction::*};
+pub use crate::{
+    graph_node::*, prio_graph::*, priority_id::*, resource_key::*, top_level_id::*, transaction::*,
+};
