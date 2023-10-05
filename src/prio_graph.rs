@@ -15,14 +15,19 @@ use {
 /// exclusive.
 /// `Transaction`s are inserted into the graph and then popped in time-priority order.
 /// Between conflicting transactions, the first to be inserted will always have higher priority.
-pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> {
+pub struct PrioGraph<
+    Id: PriorityId,
+    Rk: ResourceKey,
+    Tl: TopLevelId<Id>,
+    Pfn: Fn(&Id, &GraphNode<Id>) -> Tl,
+> {
     /// Locked resources and which transaction holds them.
     locks: HashMap<Rk, LockKind<Id>>,
     /// Graph edges and count of edges into each node. The count is used
     /// to detect joins.
     nodes: HashMap<Id, GraphNode<Id>>,
     /// Main queue - currently unblocked transactions.
-    main_queue: BinaryHeap<TopLevelId<Id>>,
+    main_queue: BinaryHeap<Tl>,
     /// Priority modification for top-level transactions.
     top_level_prioritization_fn: Pfn,
 
@@ -32,8 +37,10 @@ pub struct PrioGraph<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id
     chain_to_joined: HashMap<u64, u64>,
 }
 
-impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioGraph<Id, Rk, Pfn> {
-    /// Drains all transactions from the main queue into a batch.
+impl<Id: PriorityId, Rk: ResourceKey, Tl: TopLevelId<Id>, Pfn: Fn(&Id, &GraphNode<Id>) -> Tl>
+    PrioGraph<Id, Rk, Tl, Pfn>
+{
+    /// Drains all transactions from the primary queue into a batch.
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
     /// If any of those transactions are now unblocked, add them to the main queue.
     /// Repeat until the main queue is empty.
@@ -188,7 +195,7 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
     /// Pop the highest priority node id from the main queue.
     /// Returns None if the queue is empty.
     pub fn pop(&mut self) -> Option<Id> {
-        self.main_queue.pop().map(|top_level_id| top_level_id.id)
+        self.main_queue.pop().map(|top_level_id| top_level_id.id())
     }
 
     /// This will unblock transactions that were blocked by this transaction.
@@ -220,11 +227,8 @@ impl<Id: PriorityId, Rk: ResourceKey, Pfn: Fn(&Id, &GraphNode<Id>) -> u64> PrioG
         }
     }
 
-    fn create_top_level_id(&self, id: Id) -> TopLevelId<Id> {
-        TopLevelId {
-            id,
-            priority: (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap()),
-        }
+    fn create_top_level_id(&self, id: Id) -> Tl {
+        (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap())
     }
 
     fn trace_chain(&self, mut chain_id: u64) -> u64 {
@@ -297,7 +301,13 @@ mod tests {
         })
     }
 
-    fn test_top_level_priority_fn(id: &TxId, _node: &GraphNode<TxId>) -> u64 {
+    impl TopLevelId<TxId> for TxId {
+        fn id(&self) -> TxId {
+            *self
+        }
+    }
+
+    fn test_top_level_priority_fn(id: &TxId, _node: &GraphNode<TxId>) -> TxId {
         *id
     }
 
