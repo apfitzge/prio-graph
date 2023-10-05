@@ -40,20 +40,11 @@ impl Display for TransactionPriorityId {
 struct AccountKey([u8; 32]);
 
 struct TestTransaction {
-    id: TransactionPriorityId,
     read_accounts: Vec<AccountKey>,
     write_accounts: Vec<AccountKey>,
 }
 
-impl Transaction<TransactionPriorityId, AccountKey> for TestTransaction {
-    fn id(&self) -> TransactionPriorityId {
-        self.id
-    }
-
-    fn reward(&self) -> u64 {
-        self.id.priority
-    }
-
+impl Transaction<AccountKey> for TestTransaction {
     fn check_resource_keys<F: FnMut(&AccountKey, AccessKind)>(&self, mut checker: F) {
         for account in &self.read_accounts {
             checker(account, AccessKind::Read);
@@ -109,7 +100,6 @@ fn bench_prio_graph_build_and_consume(
             (
                 *id,
                 TestTransaction {
-                    id: *id,
                     read_accounts: vec![],
                     write_accounts,
                 },
@@ -120,9 +110,12 @@ fn bench_prio_graph_build_and_consume(
     // Begin bench.
     bencher.iter(|| {
         let _batches = test::black_box(PrioGraph::natural_batches(
-            ids.iter()
-                .cloned()
-                .map(|id| transaction_lookup_table.get(&id).expect("id must exist")),
+            ids.iter().cloned().map(|id| {
+                (
+                    id,
+                    transaction_lookup_table.get(&id).expect("id must exist"),
+                )
+            }),
             |id, _| id.priority,
         ));
     });

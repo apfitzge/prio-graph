@@ -1,12 +1,10 @@
-use crate::{PriorityId, ResourceKey};
+use crate::ResourceKey;
 
 pub enum AccessKind {
     Read,
     Write,
 }
 
-pub trait Transaction<Id: PriorityId, Rk: ResourceKey> {
-    fn id(&self) -> Id;
-    fn reward(&self) -> u64;
+pub trait Transaction<Rk: ResourceKey> {
     fn check_resource_keys<F: FnMut(&Rk, AccessKind)>(&self, checker: F);
 }
