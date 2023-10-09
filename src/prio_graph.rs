@@ -1,7 +1,7 @@
 use {
     crate::{
         lock_kind::LockKind, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey,
-        Transaction, TransactionId,
+        TransactionId,
     },
     std::{
         cmp::Ordering,
@@ -48,8 +48,8 @@ impl<
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
     /// If any of those transactions are now unblocked, add them to the main queue.
     /// Repeat until the main queue is empty.
-    pub fn natural_batches<'a>(
-        iter: impl IntoIterator<Item = (Id, &'a (impl Transaction<Rk> + 'a))>,
+    pub fn natural_batches(
+        iter: impl IntoIterator<Item = (Id, impl IntoIterator<Item = (Rk, AccessKind)>)>,
         top_level_prioritization_fn: Pfn,
     ) -> Vec<Vec<Id>> {
         // Insert all transactions into the graph.
@@ -91,7 +91,7 @@ impl<
 
     /// Insert a transaction into the graph with the given `Id`.
     /// `Transaction`s should be inserted in priority order.
-    pub fn insert_transaction(&mut self, id: Id, tx: &impl Transaction<Rk>) {
+    pub fn insert_transaction(&mut self, id: Id, tx: impl IntoIterator<Item = (Rk, AccessKind)>) {
         let mut node = GraphNode {
             active: true,
             edges: HashSet::new(),
@@ -132,31 +132,30 @@ impl<
             };
         }
 
-        tx.check_resource_keys(&mut |resource_key: &Rk, access_kind: AccessKind| match self
-            .locks
-            .entry(*resource_key)
-        {
-            Entry::Vacant(entry) => {
-                entry.insert(match access_kind {
-                    AccessKind::Read => LockKind::Read(vec![id]),
-                    AccessKind::Write => LockKind::Write(id),
-                });
-            }
-            Entry::Occupied(mut entry) => match access_kind {
-                AccessKind::Read => {
-                    if let Some(blocking_tx) = entry.get_mut().add_read(id) {
-                        block_tx!(blocking_tx);
-                    }
+        for (resource_key, access_kind) in tx.into_iter() {
+            match self.locks.entry(resource_key) {
+                Entry::Vacant(entry) => {
+                    entry.insert(match access_kind {
+                        AccessKind::Read => LockKind::Read(vec![id]),
+                        AccessKind::Write => LockKind::Write(id),
+                    });
                 }
-                AccessKind::Write => {
-                    if let Some(blocking_txs) = entry.get_mut().add_write(id) {
-                        for blocking_tx in blocking_txs {
+                Entry::Occupied(mut entry) => match access_kind {
+                    AccessKind::Read => {
+                        if let Some(blocking_tx) = entry.get_mut().add_read(id) {
                             block_tx!(blocking_tx);
                         }
                     }
-                }
-            },
-        });
+                    AccessKind::Write => {
+                        if let Some(blocking_txs) = entry.get_mut().add_write(id) {
+                            for blocking_tx in blocking_txs {
+                                block_tx!(blocking_tx);
+                            }
+                        }
+                    }
+                },
+            }
+        }
 
         // If this chain id is distinct, then increment the `next_chain_id`.
         if node.chain_id == self.next_chain_id {
@@ -256,14 +255,20 @@ mod tests {
         write_locked_resources: Vec<Account>,
     }
 
-    impl Transaction<Account> for Tx {
-        fn check_resource_keys<F: FnMut(&Account, AccessKind)>(&self, mut checker: F) {
-            for account in &self.read_locked_resources {
-                checker(account, AccessKind::Read);
-            }
-            for account in &self.write_locked_resources {
-                checker(account, AccessKind::Write);
-            }
+    impl Tx {
+        fn resources(&self) -> impl Iterator<Item = (Account, AccessKind)> + '_ {
+            let write_locked_resources = self
+                .write_locked_resources
+                .iter()
+                .cloned()
+                .map(|rk| (rk, AccessKind::Write));
+            let read_locked_resources = self
+                .read_locked_resources
+                .iter()
+                .cloned()
+                .map(|rk| (rk, AccessKind::Read));
+
+            write_locked_resources.chain(read_locked_resources)
         }
     }
 
@@ -296,11 +301,15 @@ mod tests {
     fn create_lookup_iterator<'a>(
         transaction_lookup_table: &'a HashMap<TxId, Tx>,
         reverse_priority_order_ids: &'a [TxId],
-    ) -> impl Iterator<Item = (TxId, &'a Tx)> + 'a {
+    ) -> impl Iterator<Item = (TxId, impl IntoIterator<Item = (Account, AccessKind)> + 'a)> + 'a
+    {
         reverse_priority_order_ids.iter().map(|id| {
             (
                 *id,
-                transaction_lookup_table.get(id).expect("id must exist"),
+                transaction_lookup_table
+                    .get(id)
+                    .expect("id must exist")
+                    .resources(),
             )
         })
     }
