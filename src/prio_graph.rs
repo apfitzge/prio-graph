@@ -1,6 +1,8 @@
 use {
     crate::{
-        lock::Lock, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey, TransactionId,
+        lock::Lock,
+        top_level_id::{TopLevelId, TopLevelIdWrapper},
+        AccessKind, GraphNode, ResourceKey, TransactionId,
     },
     std::{
         cmp::Ordering,
@@ -21,12 +23,12 @@ pub struct PrioGraph<
     Pfn: Fn(&Id, &GraphNode<Id>) -> Tl,
 > {
     /// Locked resources and which transaction holds them.
-    locks: HashMap<Rk, Lock<Id>>,
+    locks: HashMap<Rk, Lock>,
     /// Graph edges and count of edges into each node. The count is used
     /// to detect joins.
-    nodes: HashMap<Id, GraphNode<Id>>,
+    nodes: Vec<GraphNode<Id>>,
     /// Main queue - currently unblocked transactions.
-    main_queue: BinaryHeap<Tl>,
+    main_queue: BinaryHeap<TopLevelIdWrapper<Id, Tl>>,
     /// Priority modification for top-level transactions.
     top_level_prioritization_fn: Pfn,
 
@@ -62,12 +64,14 @@ impl<
 
         while !graph.main_queue.is_empty() {
             let mut batch = Vec::new();
-            while let Some(id) = graph.pop() {
+            let mut indexes = Vec::new();
+            while let Some((id, index)) = graph.pop() {
                 batch.push(id);
+                indexes.push(index);
             }
 
-            for id in &batch {
-                graph.unblock(id);
+            for index in indexes {
+                graph.unblock(index);
             }
 
             batches.push(batch);
@@ -80,7 +84,7 @@ impl<
     pub fn new(top_level_prioritization_fn: Pfn) -> Self {
         Self {
             locks: HashMap::new(),
-            nodes: HashMap::new(),
+            nodes: Vec::new(),
             main_queue: BinaryHeap::new(),
             top_level_prioritization_fn,
             next_chain_id: 0,
@@ -91,7 +95,9 @@ impl<
     /// Insert a transaction into the graph with the given `Id`.
     /// `Transaction`s should be inserted in priority order.
     pub fn insert_transaction(&mut self, id: Id, tx: impl IntoIterator<Item = (Rk, AccessKind)>) {
+        let index = self.nodes.len();
         let mut node = GraphNode {
+            id,
             active: true,
             edges: HashSet::new(),
             blocked_by_count: 0,
@@ -100,8 +106,8 @@ impl<
 
         let mut joined_chains = HashSet::new();
 
-        let mut block_tx = |blocking_id: Id| {
-            let Some(blocking_tx_node) = self.nodes.get_mut(&blocking_id) else {
+        let mut block_tx = |blocking_index: usize| {
+            let Some(blocking_tx_node) = self.nodes.get_mut(blocking_index) else {
                 panic!("blocking node must exist");
             };
 
@@ -109,7 +115,7 @@ impl<
             if blocking_tx_node.active {
                 // Add edges to the current node.
                 // If it is a unique edge, increment the blocked_by_count for the current node.
-                if blocking_tx_node.edges.insert(id) {
+                if blocking_tx_node.edges.insert(index) {
                     node.blocked_by_count += 1;
                 }
             }
@@ -132,18 +138,18 @@ impl<
             match self.locks.entry(resource_key) {
                 Entry::Vacant(entry) => {
                     entry.insert(match access_kind {
-                        AccessKind::Read => Lock::Read(vec![id]),
-                        AccessKind::Write => Lock::Write(id),
+                        AccessKind::Read => Lock::Read(vec![index]),
+                        AccessKind::Write => Lock::Write(index),
                     });
                 }
                 Entry::Occupied(mut entry) => match access_kind {
                     AccessKind::Read => {
-                        if let Some(blocking_tx) = entry.get_mut().add_read(id) {
+                        if let Some(blocking_tx) = entry.get_mut().add_read(index) {
                             block_tx(blocking_tx);
                         }
                     }
                     AccessKind::Write => {
-                        if let Some(blocking_txs) = entry.get_mut().add_write(id) {
+                        if let Some(blocking_txs) = entry.get_mut().add_write(index) {
                             for blocking_tx in blocking_txs {
                                 block_tx(blocking_tx);
                             }
@@ -163,11 +169,11 @@ impl<
             self.chain_to_joined.insert(joining_chain, node.chain_id);
         }
 
-        self.nodes.insert(id, node);
+        self.nodes.push(node);
 
         // If the node is not blocked, add it to the main queue.
-        if self.nodes.get(&id).unwrap().blocked_by_count == 0 {
-            self.main_queue.push(self.create_top_level_id(id));
+        if self.nodes.get(index).unwrap().blocked_by_count == 0 {
+            self.main_queue.push(self.create_top_level_id(id, index));
         }
     }
 
@@ -176,25 +182,30 @@ impl<
         self.main_queue.is_empty()
     }
 
-    /// Returns the minimum chain id for a given node id.
+    /// Returns the minimum chain id for a given node index.
     ///
     /// Panics:
     ///     - Node does not exist.
-    pub fn chain_id(&self, id: &Id) -> u64 {
-        Self::trace_chain(&self.chain_to_joined, self.nodes.get(id).unwrap().chain_id)
+    pub fn chain_id(&self, index: usize) -> u64 {
+        Self::trace_chain(
+            &self.chain_to_joined,
+            self.nodes.get(index).unwrap().chain_id,
+        )
     }
 
     /// Combination of `pop` and `unblock`.
     pub fn pop_and_unblock(&mut self) -> Option<Id> {
-        let id = self.pop()?;
-        self.unblock(&id);
+        let (id, index) = self.pop()?;
+        self.unblock(index);
         Some(id)
     }
 
-    /// Pop the highest priority node id from the main queue.
+    /// Pop the highest priority node (id, index) from the main queue.
     /// Returns None if the queue is empty.
-    pub fn pop(&mut self) -> Option<Id> {
-        self.main_queue.pop().map(|top_level_id| top_level_id.id())
+    pub fn pop(&mut self) -> Option<(Id, usize)> {
+        self.main_queue
+            .pop()
+            .map(|top_level_id| (top_level_id.id.id(), top_level_id.index))
     }
 
     /// This will unblock transactions that were blocked by this transaction.
@@ -202,9 +213,9 @@ impl<
     /// Panics:
     ///     - Node does not exist.
     ///     - If the node.blocked_by_count != 0
-    pub fn unblock(&mut self, id: &Id) {
+    pub fn unblock(&mut self, index: usize) {
         // If the node is already removed, do nothing.
-        let Some(node) = self.nodes.get_mut(id) else {
+        let Some(node) = self.nodes.get_mut(index) else {
             panic!("node must exist");
         };
         assert_eq!(node.blocked_by_count, 0, "node must be unblocked");
@@ -213,21 +224,24 @@ impl<
         let edges = core::mem::take(&mut node.edges);
 
         // Unblock transactions that were blocked by this node.
-        for blocked_tx in edges.iter() {
+        for blocked_tx_index in edges.into_iter() {
             let blocked_tx_node = self
                 .nodes
-                .get_mut(blocked_tx)
+                .get_mut(blocked_tx_index)
                 .expect("blocked_tx must exist");
             blocked_tx_node.blocked_by_count -= 1;
+            let blocked_tx_id = blocked_tx_node.id;
 
             if blocked_tx_node.blocked_by_count == 0 {
-                self.main_queue.push(self.create_top_level_id(*blocked_tx));
+                self.main_queue
+                    .push(self.create_top_level_id(blocked_tx_id, blocked_tx_index));
             }
         }
     }
 
-    fn create_top_level_id(&self, id: Id) -> Tl {
-        (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap())
+    fn create_top_level_id(&self, id: Id, index: usize) -> TopLevelIdWrapper<Id, Tl> {
+        let id = (self.top_level_prioritization_fn)(&id, self.nodes.get(index).unwrap());
+        TopLevelIdWrapper::new(id, index)
     }
 
     fn trace_chain(chain_to_joined: &HashMap<u64, u64>, mut chain_id: u64) -> u64 {
