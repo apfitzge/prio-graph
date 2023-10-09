@@ -8,6 +8,7 @@ homepage = "https://github.com/apfitzge/prio-graph"
 repository = "https://github.com/apfitzge/prio-graph"
 license-file = "LICENSE"
 edition = "2021"
+include = ["src/*.rs", "Cargo.toml"]
 
 [dependencies]
 
