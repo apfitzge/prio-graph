@@ -101,36 +101,33 @@ impl<
 
         let mut joined_chains = HashSet::new();
 
-        // Using a macro since a closure cannot be used.
-        macro_rules! block_tx {
-            ($blocking_id:expr) => {
-                let Some(blocking_tx_node) = self.nodes.get_mut(&$blocking_id) else {
-                    panic!("blocking node must exist");
-                };
-
-                // If the node isn't active then we only do chain tracking.
-                if blocking_tx_node.active {
-                    // Add edges to the current node.
-                    // If it is a unique edge, increment the blocked_by_count for the current node.
-                    if blocking_tx_node.edges.insert(id) {
-                        node.blocked_by_count += 1;
-                    }
-                }
-                let blocking_chain_id = blocking_tx_node.chain_id;
-                let blocking_chain_id = self.trace_chain(blocking_chain_id);
-
-                match node.chain_id.cmp(&blocking_chain_id) {
-                    Ordering::Less => {
-                        joined_chains.insert(blocking_chain_id);
-                    }
-                    Ordering::Equal => {}
-                    Ordering::Greater => {
-                        joined_chains.insert(node.chain_id);
-                        node.chain_id = blocking_chain_id;
-                    }
-                }
+        let mut block_tx = |blocking_id: Id| {
+            let Some(blocking_tx_node) = self.nodes.get_mut(&blocking_id) else {
+                panic!("blocking node must exist");
             };
-        }
+
+            // If the node isn't active then we only do chain tracking.
+            if blocking_tx_node.active {
+                // Add edges to the current node.
+                // If it is a unique edge, increment the blocked_by_count for the current node.
+                if blocking_tx_node.edges.insert(id) {
+                    node.blocked_by_count += 1;
+                }
+            }
+            let blocking_chain_id = blocking_tx_node.chain_id;
+            let blocking_chain_id = Self::trace_chain(&self.chain_to_joined, blocking_chain_id);
+
+            match node.chain_id.cmp(&blocking_chain_id) {
+                Ordering::Less => {
+                    joined_chains.insert(blocking_chain_id);
+                }
+                Ordering::Equal => {}
+                Ordering::Greater => {
+                    joined_chains.insert(node.chain_id);
+                    node.chain_id = blocking_chain_id;
+                }
+            }
+        };
 
         for (resource_key, access_kind) in tx.into_iter() {
             match self.locks.entry(resource_key) {
@@ -143,13 +140,13 @@ impl<
                 Entry::Occupied(mut entry) => match access_kind {
                     AccessKind::Read => {
                         if let Some(blocking_tx) = entry.get_mut().add_read(id) {
-                            block_tx!(blocking_tx);
+                            block_tx(blocking_tx);
                         }
                     }
                     AccessKind::Write => {
                         if let Some(blocking_txs) = entry.get_mut().add_write(id) {
                             for blocking_tx in blocking_txs {
-                                block_tx!(blocking_tx);
+                                block_tx(blocking_tx);
                             }
                         }
                     }
@@ -185,7 +182,7 @@ impl<
     /// Panics:
     ///     - Node does not exist.
     pub fn chain_id(&self, id: &Id) -> u64 {
-        self.trace_chain(self.nodes.get(id).unwrap().chain_id)
+        Self::trace_chain(&self.chain_to_joined, self.nodes.get(id).unwrap().chain_id)
     }
 
     /// Combination of `pop` and `unblock`.
@@ -234,8 +231,8 @@ impl<
         (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap())
     }
 
-    fn trace_chain(&self, mut chain_id: u64) -> u64 {
-        while let Some(joined_chain) = self.chain_to_joined.get(&chain_id) {
+    fn trace_chain(chain_to_joined: &HashMap<u64, u64>, mut chain_id: u64) -> u64 {
+        while let Some(joined_chain) = chain_to_joined.get(&chain_id) {
             chain_id = *joined_chain;
         }
         chain_id
