@@ -3,7 +3,7 @@
 extern crate test;
 
 use {
-    prio_graph::{AccessKind, PrioGraph, TopLevelId, Transaction},
+    prio_graph::{AccessKind, PrioGraph, TopLevelId},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{collections::HashMap, fmt::Display, hash::Hash},
     test::Bencher,
@@ -56,14 +56,20 @@ struct TestTransaction {
     write_accounts: Vec<AccountKey>,
 }
 
-impl Transaction<AccountKey> for TestTransaction {
-    fn check_resource_keys<F: FnMut(&AccountKey, AccessKind)>(&self, mut checker: F) {
-        for account in &self.read_accounts {
-            checker(account, AccessKind::Read);
-        }
-        for account in &self.write_accounts {
-            checker(account, AccessKind::Write);
-        }
+impl TestTransaction {
+    fn resources(&self) -> impl Iterator<Item = (AccountKey, AccessKind)> + '_ {
+        let write_locked_resources = self
+            .write_accounts
+            .iter()
+            .cloned()
+            .map(|rk| (rk, AccessKind::Write));
+        let read_locked_resources = self
+            .read_accounts
+            .iter()
+            .cloned()
+            .map(|rk| (rk, AccessKind::Read));
+
+        write_locked_resources.chain(read_locked_resources)
     }
 }
 
@@ -125,7 +131,10 @@ fn bench_prio_graph_build_and_consume(
             ids.iter().cloned().map(|id| {
                 (
                     id,
-                    transaction_lookup_table.get(&id).expect("id must exist"),
+                    transaction_lookup_table
+                        .get(&id)
+                        .expect("id must exist")
+                        .resources(),
                 )
             }),
             |id, _| *id,
