@@ -1,5 +1,5 @@
 mod graph_node;
-mod lock_kind;
+mod lock;
 mod prio_graph;
 mod resource_key;
 mod top_level_id;

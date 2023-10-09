@@ -1,7 +1,6 @@
 use {
     crate::{
-        lock_kind::LockKind, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey,
-        TransactionId,
+        lock::Lock, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey, TransactionId,
     },
     std::{
         cmp::Ordering,
@@ -22,7 +21,7 @@ pub struct PrioGraph<
     Pfn: Fn(&Id, &GraphNode<Id>) -> Tl,
 > {
     /// Locked resources and which transaction holds them.
-    locks: HashMap<Rk, LockKind<Id>>,
+    locks: HashMap<Rk, Lock<Id>>,
     /// Graph edges and count of edges into each node. The count is used
     /// to detect joins.
     nodes: HashMap<Id, GraphNode<Id>>,
@@ -133,8 +132,8 @@ impl<
             match self.locks.entry(resource_key) {
                 Entry::Vacant(entry) => {
                     entry.insert(match access_kind {
-                        AccessKind::Read => LockKind::Read(vec![id]),
-                        AccessKind::Write => LockKind::Write(id),
+                        AccessKind::Read => Lock::Read(vec![id]),
+                        AccessKind::Write => Lock::Write(id),
                     });
                 }
                 Entry::Occupied(mut entry) => match access_kind {
