@@ -1,7 +1,7 @@
 use {
     crate::{
-        lock_kind::LockKind, top_level_id::TopLevelId, AccessKind, GraphNode, PriorityId,
-        ResourceKey, Transaction,
+        lock_kind::LockKind, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey,
+        Transaction, TransactionId,
     },
     std::{
         cmp::Ordering,
@@ -16,7 +16,7 @@ use {
 /// `Transaction`s are inserted into the graph and then popped in time-priority order.
 /// Between conflicting transactions, the first to be inserted will always have higher priority.
 pub struct PrioGraph<
-    Id: PriorityId,
+    Id: TransactionId,
     Rk: ResourceKey,
     Tl: TopLevelId<Id>,
     Pfn: Fn(&Id, &GraphNode<Id>) -> Tl,
@@ -37,8 +37,12 @@ pub struct PrioGraph<
     chain_to_joined: HashMap<u64, u64>,
 }
 
-impl<Id: PriorityId, Rk: ResourceKey, Tl: TopLevelId<Id>, Pfn: Fn(&Id, &GraphNode<Id>) -> Tl>
-    PrioGraph<Id, Rk, Tl, Pfn>
+impl<
+        Id: TransactionId,
+        Rk: ResourceKey,
+        Tl: TopLevelId<Id>,
+        Pfn: Fn(&Id, &GraphNode<Id>) -> Tl,
+    > PrioGraph<Id, Rk, Tl, Pfn>
 {
     /// Drains all transactions from the primary queue into a batch.
     /// Then, for each transaction in the batch, unblock transactions it was blocking.

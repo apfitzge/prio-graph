@@ -1,14 +1,14 @@
-use crate::PriorityId;
+use crate::TransactionId;
 
 /// A read-lock can be held by multiple transactions, and
 /// subsequent write-locks should be blocked by all of them.
 /// Write-locks are exclusive.
-pub(crate) enum LockKind<Id: PriorityId> {
+pub(crate) enum LockKind<Id: TransactionId> {
     Read(Vec<Id>),
     Write(Id),
 }
 
-impl<Id: PriorityId> LockKind<Id> {
+impl<Id: TransactionId> LockKind<Id> {
     /// Take read-lock on a resource.
     /// Returns the id of the write transaction that is blocking the added read.
     pub fn add_read(&mut self, id: Id) -> Option<Id> {
