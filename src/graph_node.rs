@@ -1,10 +1,10 @@
-use {crate::PriorityId, std::collections::HashSet};
+use {crate::TransactionId, std::collections::HashSet};
 
 /// A single node in a priority graph that is associated with a `Transaction`.
 /// When a node reaches the main queue, the top-level prioritization function can use a reference
 /// to this node to calculate a modified priority for the node, which is only used for
 /// prioritization for the main queue.
-pub struct GraphNode<Id: PriorityId> {
+pub struct GraphNode<Id: TransactionId> {
     /// Whether this node is active, i.e. has not been removed from the main queue.
     pub(crate) active: bool,
     /// Number of edges into this node.
