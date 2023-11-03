@@ -185,10 +185,11 @@ impl<
     }
 
     /// Combination of `pop` and `unblock`.
-    pub fn pop_and_unblock(&mut self) -> Option<Id> {
+    /// Returns None if the queue is empty.
+    /// Returns the `Id` of the popped node, and the set of unblocked `Id`s.
+    pub fn pop_and_unblock(&mut self) -> Option<(Id, HashSet<Id>)> {
         let id = self.pop()?;
-        self.unblock(&id);
-        Some(id)
+        Some((id, self.unblock(&id)))
     }
 
     /// Pop the highest priority node id from the main queue.
@@ -198,11 +199,12 @@ impl<
     }
 
     /// This will unblock transactions that were blocked by this transaction.
+    /// Returns the set of `Id`s that were unblocked.
     ///
     /// Panics:
     ///     - Node does not exist.
     ///     - If the node.blocked_by_count != 0
-    pub fn unblock(&mut self, id: &Id) {
+    pub fn unblock(&mut self, id: &Id) -> HashSet<Id> {
         // If the node is already removed, do nothing.
         let Some(node) = self.nodes.get_mut(id) else {
             panic!("node must exist");
@@ -224,6 +226,8 @@ impl<
                 self.main_queue.push(self.create_top_level_id(*blocked_tx));
             }
         }
+
+        edges
     }
 
     fn create_top_level_id(&self, id: Id) -> Tl {
