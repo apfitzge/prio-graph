@@ -113,8 +113,16 @@ impl<
                     node.blocked_by_count += 1;
                 }
             }
-            let blocking_chain_id = blocking_tx_node.chain_id;
-            let blocking_chain_id = Self::trace_chain(&self.chain_to_joined, blocking_chain_id);
+
+            // If this is not the first edge out of the blocking node, then we split the chain
+            // into a new one.
+            // This is forking off from the main chain.
+            let blocking_chain_id = if blocking_tx_node.edges.len() == 1 {
+                let blocking_chain_id = blocking_tx_node.chain_id;
+                Self::trace_chain(&self.chain_to_joined, blocking_chain_id)
+            } else {
+                self.next_chain_id
+            };
 
             match node.chain_id.cmp(&blocking_chain_id) {
                 Ordering::Less => {
