@@ -230,6 +230,15 @@ impl<
         edges
     }
 
+    /// Returns whether the given `Id` is at the top level of the graph, i.e. not blocked.
+    /// If the node does not exist, returns false.
+    pub fn is_blocked(&self, id: Id) -> bool {
+        self.nodes
+            .get(&id)
+            .map(|node| node.active && node.blocked_by_count != 0)
+            .unwrap_or_default()
+    }
+
     fn create_top_level_id(&self, id: Id) -> Tl {
         (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap())
     }
