@@ -101,6 +101,12 @@ impl<
         let mut joined_chains = HashSet::new();
 
         let mut block_tx = |blocking_id: Id| {
+            // If the blocking transaction is the same as the current transaction, do nothing.
+            // This indicates the transaction has multiple accesses to the same resource.
+            if blocking_id == id {
+                return;
+            }
+
             let Some(blocking_tx_node) = self.nodes.get_mut(&blocking_id) else {
                 panic!("blocking node must exist");
             };
@@ -456,5 +462,35 @@ mod tests {
             test_top_level_priority_fn,
         );
         assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
+    }
+
+    #[test]
+    fn test_self_conflicting() {
+        // Setup:
+        //   - transaction read and write locks account 0.
+        // 1
+        // Batches: [1]
+        let (transaction_lookup_table, transaction_queue) =
+            setup_test([(vec![1], vec![0], vec![0])]);
+        let batches = PrioGraph::natural_batches(
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
+            test_top_level_priority_fn,
+        );
+        assert_eq!(batches, [vec![1]]);
+    }
+
+    #[test]
+    fn test_self_conflicting_write_priority() {
+        // Setup:
+        //   - transaction 2 read and write locks account 0.
+        // 2 --> 1
+        // Batches: [2, 1]
+        let (transaction_lookup_table, transaction_queue) =
+            setup_test([(vec![2], vec![0], vec![0]), (vec![1], vec![0], vec![])]);
+        let batches = PrioGraph::natural_batches(
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
+            test_top_level_priority_fn,
+        );
+        assert_eq!(batches, [vec![2], vec![1]]);
     }
 }
