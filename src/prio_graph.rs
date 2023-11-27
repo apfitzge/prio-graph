@@ -101,6 +101,12 @@ impl<
         let mut joined_chains = HashSet::new();
 
         let mut block_tx = |blocking_id: Id| {
+            // If the blocking transaction is the same as the current transaction, do nothing.
+            // This indicates the transaction has multiple accesses to the same resource.
+            if blocking_id == id {
+                return;
+            }
+
             let Some(blocking_tx_node) = self.nodes.get_mut(&blocking_id) else {
                 panic!("blocking node must exist");
             };
