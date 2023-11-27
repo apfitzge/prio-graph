@@ -457,4 +457,19 @@ mod tests {
         );
         assert_eq!(batches, [vec![8, 7], vec![6, 5], vec![4, 3], vec![2, 1]]);
     }
+
+    #[test]
+    fn test_self_conflicting() {
+        // Setup:
+        //   - transaction read and write locks account 0.
+        // 1
+        // Batches: [1]
+        let (transaction_lookup_table, transaction_queue) =
+            setup_test([(vec![1], vec![0], vec![0])]);
+        let batches = PrioGraph::natural_batches(
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
+            test_top_level_priority_fn,
+        );
+        assert_eq!(batches, [vec![1]]);
+    }
 }
