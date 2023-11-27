@@ -17,7 +17,12 @@ impl<Id: TransactionId> Lock<Id> {
                 ids.push(id);
                 None
             }
-            Lock::Write(_) => {
+            Lock::Write(current_write_id) => {
+                // If the current write is the same as the one we're adding,
+                // do not overwrite the write-lock.
+                if *current_write_id == id {
+                    return None;
+                }
                 let Lock::Write(id) = core::mem::replace(self, Lock::Read(vec![id])) else {
                     unreachable!("LockKind::Write is guaranteed by match");
                 };
@@ -31,7 +36,13 @@ impl<Id: TransactionId> Lock<Id> {
     pub fn add_write(&mut self, id: Id) -> Option<Vec<Id>> {
         match core::mem::replace(self, Lock::Write(id)) {
             Lock::Read(ids) => Some(ids),
-            Lock::Write(id) => Some(vec![id]),
+            Lock::Write(current_write_id) => {
+                if current_write_id == id {
+                    None
+                } else {
+                    Some(vec![current_write_id])
+                }
+            }
         }
     }
 }
