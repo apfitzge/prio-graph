@@ -493,4 +493,21 @@ mod tests {
         );
         assert_eq!(batches, [vec![2], vec![1]]);
     }
+
+    #[test]
+    fn test_write_read_read_conflict() {
+        // Setup:
+        //  - W --> R
+        //      \
+        //       -> R
+        // - all transactions using same account 0.
+        // Batches: [3], [2, 1]
+        let (transaction_lookup_table, transaction_queue) =
+            setup_test([(vec![3], vec![], vec![0]), (vec![2, 1], vec![0], vec![])]);
+        let batches = PrioGraph::natural_batches(
+            create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
+            test_top_level_priority_fn,
+        );
+        assert_eq!(batches, [vec![3], vec![2, 1]]);
+    }
 }
