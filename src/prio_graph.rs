@@ -138,7 +138,7 @@ impl<
             match self.locks.entry(resource_key) {
                 Entry::Vacant(entry) => {
                     entry.insert(match access_kind {
-                        AccessKind::Read => Lock::Read(vec![id]),
+                        AccessKind::Read => Lock::Read(vec![id], None),
                         AccessKind::Write => Lock::Write(id),
                     });
                 }
