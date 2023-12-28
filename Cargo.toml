@@ -1,7 +1,7 @@
 [package]
 name = "prio-graph"
 authors = ["Andrew Fitzgerald <apfitzge@gmail.com>"]
-version = "0.2.0"
+version = "0.2.1"
 description = "A lazily populated directed acyclic graph with top-level priority ordering"
 readme = "README.md"
 homepage = "https://github.com/apfitzge/prio-graph"
