@@ -13,4 +13,9 @@ include = ["src/*.rs", "Cargo.toml"]
 [dependencies]
 
 [dev-dependencies]
+criterion = { version = "0.5.1" }
 rand = { version = "0.8.4" }
+
+[[bench]]
+name = "prio_graph"
+harness = false
