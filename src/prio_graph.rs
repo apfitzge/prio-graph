@@ -2,7 +2,7 @@ use {
     crate::{
         lock::Lock, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey, TransactionId,
     },
-    std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
+    std::collections::{hash_map::Entry, BinaryHeap, HashMap},
 };
 
 /// A directed acyclic graph where edges are only present between nodes if
@@ -83,7 +83,7 @@ impl<
     pub fn insert_transaction(&mut self, id: Id, tx: impl IntoIterator<Item = (Rk, AccessKind)>) {
         let mut node = GraphNode {
             active: true,
-            edges: HashSet::new(),
+            edges: Vec::new(),
             blocked_by_count: 0,
         };
 
@@ -102,7 +102,7 @@ impl<
             if blocking_tx_node.active {
                 // Add edges to the current node.
                 // If it is a unique edge, increment the blocked_by_count for the current node.
-                if blocking_tx_node.edges.insert(id) {
+                if blocking_tx_node.try_add_edge(id) {
                     node.blocked_by_count += 1;
                 }
             }
@@ -149,7 +149,7 @@ impl<
     /// Combination of `pop` and `unblock`.
     /// Returns None if the queue is empty.
     /// Returns the `Id` of the popped node, and the set of unblocked `Id`s.
-    pub fn pop_and_unblock(&mut self) -> Option<(Id, HashSet<Id>)> {
+    pub fn pop_and_unblock(&mut self) -> Option<(Id, Vec<Id>)> {
         let id = self.pop()?;
         Some((id, self.unblock(&id)))
     }
@@ -166,7 +166,7 @@ impl<
     /// Panics:
     ///     - Node does not exist.
     ///     - If the node.blocked_by_count != 0
-    pub fn unblock(&mut self, id: &Id) -> HashSet<Id> {
+    pub fn unblock(&mut self, id: &Id) -> Vec<Id> {
         // If the node is already removed, do nothing.
         let Some(node) = self.nodes.get_mut(id) else {
             panic!("node must exist");
