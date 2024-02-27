@@ -12,6 +12,4 @@ pub struct GraphNode<Id: TransactionId> {
     /// Unique edges from this node.
     /// The number of edges is the same as the number of forks.
     pub edges: HashSet<Id>,
-    /// The distinct chain id of this node.
-    pub chain_id: u64,
 }
