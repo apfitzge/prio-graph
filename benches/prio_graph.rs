@@ -69,7 +69,7 @@ impl TestTransaction {
     }
 }
 
-fn bench_prio_graph_build_and_consume(
+fn bench_prio_graph_random_access(
     bencher: &mut Criterion,
     num_transactions: u64,
     num_accounts: u64,
@@ -123,7 +123,7 @@ fn bench_prio_graph_build_and_consume(
 
     // Begin bench.
     bencher.bench_function(
-        &format!("bench_prio_graph_build_and_consume_{num_transactions}_txs_{num_accounts}_accts"),
+        &format!("bench_prio_graph_random_access_{num_transactions}_txs_{num_accounts}_accts"),
         |bencher| {
             bencher.iter(|| {
                 let _batches = black_box(PrioGraph::natural_batches(
@@ -143,18 +143,18 @@ fn bench_prio_graph_build_and_consume(
     );
 }
 
-fn build_and_consume_benchmarks(bencher: &mut Criterion) {
-    bench_prio_graph_build_and_consume(bencher, 100, 2);
-    bench_prio_graph_build_and_consume(bencher, 100, 100);
-    bench_prio_graph_build_and_consume(bencher, 100, 1_000);
-    bench_prio_graph_build_and_consume(bencher, 1_000, 2);
-    bench_prio_graph_build_and_consume(bencher, 1_000, 100);
-    bench_prio_graph_build_and_consume(bencher, 1_000, 1_000);
-    bench_prio_graph_build_and_consume(bencher, 1_000, 10_000);
-    bench_prio_graph_build_and_consume(bencher, 10_000, 2);
-    bench_prio_graph_build_and_consume(bencher, 10_000, 1_000);
-    bench_prio_graph_build_and_consume(bencher, 10_000, 10_000);
+fn benchmark_prio_graph_random_access(bencher: &mut Criterion) {
+    bench_prio_graph_random_access(bencher, 100, 2);
+    bench_prio_graph_random_access(bencher, 100, 100);
+    bench_prio_graph_random_access(bencher, 100, 1_000);
+    bench_prio_graph_random_access(bencher, 1_000, 2);
+    bench_prio_graph_random_access(bencher, 1_000, 100);
+    bench_prio_graph_random_access(bencher, 1_000, 1_000);
+    bench_prio_graph_random_access(bencher, 1_000, 10_000);
+    bench_prio_graph_random_access(bencher, 10_000, 2);
+    bench_prio_graph_random_access(bencher, 10_000, 1_000);
+    bench_prio_graph_random_access(bencher, 10_000, 10_000);
 }
 
-criterion_group!(benches, build_and_consume_benchmarks);
-criterion_main!(benches);
+criterion_group!(random_access, benchmark_prio_graph_random_access);
+criterion_main!(random_access);
