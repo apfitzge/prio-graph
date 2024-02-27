@@ -2,10 +2,7 @@ use {
     crate::{
         lock::Lock, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey, TransactionId,
     },
-    std::{
-        cmp::Ordering,
-        collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
-    },
+    std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
 /// A directed acyclic graph where edges are only present between nodes if
@@ -29,11 +26,6 @@ pub struct PrioGraph<
     main_queue: BinaryHeap<Tl>,
     /// Priority modification for top-level transactions.
     top_level_prioritization_fn: Pfn,
-
-    /// Used to generate the next distinct chain id.
-    next_chain_id: u64,
-    /// Map from chain id to joined chain.
-    chain_to_joined: HashMap<u64, u64>,
 }
 
 impl<
@@ -83,8 +75,6 @@ impl<
             nodes: HashMap::new(),
             main_queue: BinaryHeap::new(),
             top_level_prioritization_fn,
-            next_chain_id: 0,
-            chain_to_joined: HashMap::new(),
         }
     }
 
@@ -95,10 +85,7 @@ impl<
             active: true,
             edges: HashSet::new(),
             blocked_by_count: 0,
-            chain_id: self.next_chain_id,
         };
-
-        let mut joined_chains = HashSet::new();
 
         let mut block_tx = |blocking_id: Id| {
             // If the blocking transaction is the same as the current transaction, do nothing.
@@ -117,19 +104,6 @@ impl<
                 // If it is a unique edge, increment the blocked_by_count for the current node.
                 if blocking_tx_node.edges.insert(id) {
                     node.blocked_by_count += 1;
-                }
-            }
-            let blocking_chain_id = blocking_tx_node.chain_id;
-            let blocking_chain_id = Self::trace_chain(&self.chain_to_joined, blocking_chain_id);
-
-            match node.chain_id.cmp(&blocking_chain_id) {
-                Ordering::Less => {
-                    joined_chains.insert(blocking_chain_id);
-                }
-                Ordering::Equal => {}
-                Ordering::Greater => {
-                    joined_chains.insert(node.chain_id);
-                    node.chain_id = blocking_chain_id;
                 }
             }
         };
@@ -159,16 +133,6 @@ impl<
             }
         }
 
-        // If this chain id is distinct, then increment the `next_chain_id`.
-        if node.chain_id == self.next_chain_id {
-            self.next_chain_id += 1;
-        }
-
-        // Add all joining chains into the map.
-        for joining_chain in joined_chains {
-            self.chain_to_joined.insert(joining_chain, node.chain_id);
-        }
-
         self.nodes.insert(id, node);
 
         // If the node is not blocked, add it to the main queue.
@@ -180,14 +144,6 @@ impl<
     /// Returns true if the main queue is empty.
     pub fn is_empty(&self) -> bool {
         self.main_queue.is_empty()
-    }
-
-    /// Returns the minimum chain id for a given node id.
-    ///
-    /// Panics:
-    ///     - Node does not exist.
-    pub fn chain_id(&self, id: &Id) -> u64 {
-        Self::trace_chain(&self.chain_to_joined, self.nodes.get(id).unwrap().chain_id)
     }
 
     /// Combination of `pop` and `unblock`.
@@ -247,13 +203,6 @@ impl<
 
     fn create_top_level_id(&self, id: Id) -> Tl {
         (self.top_level_prioritization_fn)(&id, self.nodes.get(&id).unwrap())
-    }
-
-    fn trace_chain(chain_to_joined: &HashMap<u64, u64>, mut chain_id: u64) -> u64 {
-        while let Some(joined_chain) = chain_to_joined.get(&chain_id) {
-            chain_id = *joined_chain;
-        }
-        chain_id
     }
 }
 
