@@ -207,6 +207,53 @@ fn benchmark_prio_graph_no_conflict(bencher: &mut Criterion) {
     }
 }
 
+fn bench_prio_graph_all_conflict(
+    bencher: &mut Criterion,
+    num_transactions: u64,
+    num_accounts_per_transaction: usize,
+) {
+    // Generate priority-ordered ids
+    let ids = generate_priority_ids(num_transactions);
+
+    // Generate shared write accounts for all transactions.
+    let write_accounts: Vec<_> = (0..num_accounts_per_transaction)
+        .map(|_| AccountKey::random())
+        .collect();
+
+    // Generate transactions, store in vector with ids to avoid lookup.
+    let ids_and_txs: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            (
+                *id,
+                TestTransaction {
+                    read_accounts: vec![],
+                    write_accounts: write_accounts.clone(),
+                },
+            )
+        })
+        .collect();
+
+    bench_prio_graph(
+        bencher,
+        &format!("all_conflict_{num_transactions}_{num_accounts_per_transaction}"),
+        &ids_and_txs,
+    );
+}
+
+fn benchmark_prio_graph_all_conflict(bencher: &mut Criterion) {
+    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
+        for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+            bench_prio_graph_all_conflict(
+                bencher,
+                num_transactions,
+                num_accounts_per_transaction as usize,
+            );
+        }
+    }
+}
+
 criterion_group!(random_access, benchmark_prio_graph_random_access);
 criterion_group!(no_conflict, benchmark_prio_graph_no_conflict);
-criterion_main!(random_access, no_conflict);
+criterion_group!(all_conflict, benchmark_prio_graph_all_conflict);
+criterion_main!(random_access, no_conflict, all_conflict);
