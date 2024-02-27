@@ -2,7 +2,7 @@ use {
     criterion::{black_box, criterion_group, criterion_main, Criterion},
     prio_graph::{AccessKind, PrioGraph, TopLevelId},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
-    std::{collections::HashMap, fmt::Display, hash::Hash},
+    std::{fmt::Display, hash::Hash},
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -81,22 +81,13 @@ impl TestTransaction {
 fn bench_prio_graph(
     bencher: &mut Criterion,
     name: &str,
-    ids: &[TransactionPriorityId],
-    transaction_lookup_table: HashMap<TransactionPriorityId, TestTransaction>,
+    ids_and_txs: &[(TransactionPriorityId, TestTransaction)],
 ) {
     // Begin bench.
     bencher.bench_function(name, |bencher| {
         bencher.iter(|| {
             let _batches = black_box(PrioGraph::natural_batches(
-                ids.iter().cloned().map(|id| {
-                    (
-                        id,
-                        transaction_lookup_table
-                            .get(&id)
-                            .expect("id must exist")
-                            .resources(),
-                    )
-                }),
+                ids_and_txs.iter().map(|(id, tx)| (*id, tx.resources())),
                 |id, _| *id,
             ));
         });
@@ -127,9 +118,9 @@ fn bench_prio_graph_random_access(
     // Generate account keys.
     let account_keys: Vec<_> = (0..num_accounts).map(|_| AccountKey::random()).collect();
 
-    // Generate transactions, store in lookup table.
+    // Generate transactions, store in vector with ids to avoid lookup.
     let num_accounts_distribution = Uniform::new(2, 32);
-    let transaction_lookup_table: HashMap<_, _> = ids
+    let ids_and_txs: Vec<_> = ids
         .iter()
         .map(|id| {
             let transaction_num_accounts = rng.sample(num_accounts_distribution);
@@ -152,8 +143,7 @@ fn bench_prio_graph_random_access(
     bench_prio_graph(
         bencher,
         &format!("bench_prio_graph_random_access_{num_transactions}_txs_{num_accounts}_accts"),
-        &ids,
-        transaction_lookup_table,
+        &ids_and_txs,
     );
 }
 
