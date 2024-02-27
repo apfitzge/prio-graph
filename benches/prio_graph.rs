@@ -148,7 +148,7 @@ fn bench_prio_graph_random_access(
 fn benchmark_prio_graph_random_access(bencher: &mut Criterion) {
     for num_transactions in [100, 1_000, 10_000].iter().cloned() {
         for num_accounts in [2, 100, 1_000, 10_000].iter().cloned() {
-            for num_accounts_per_transaction in [2, 4, 16, 32, 64, 128, 256].iter().cloned() {
+            for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
                 if num_accounts_per_transaction > num_accounts {
                     continue;
                 }
