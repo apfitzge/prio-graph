@@ -78,6 +78,17 @@ impl TestTransaction {
     }
 }
 
+fn generate_priority_ids(num_transactions: u64) -> Vec<TransactionPriorityId> {
+    let mut rng = thread_rng();
+    let priority_distribution = Uniform::new(0, 1000);
+    (0..num_transactions)
+        .map(|id| TransactionPriorityId {
+            id,
+            priority: rng.sample(priority_distribution),
+        })
+        .collect()
+}
+
 fn bench_prio_graph(
     bencher: &mut Criterion,
     name: &str,
@@ -100,26 +111,14 @@ fn bench_prio_graph_random_access(
     num_accounts: u64,
     num_accounts_per_transaction: usize,
 ) {
-    let mut rng = thread_rng();
-    let priority_distribution = Uniform::new(0, 1000);
-
     // Generate priority-ordered ids
-    let ids = {
-        let mut ids: Vec<_> = (0..num_transactions)
-            .rev()
-            .map(|id| (id, rng.sample(priority_distribution)))
-            .map(|(id, priority)| TransactionPriorityId { id, priority })
-            .collect();
-
-        // Sort in reverse order so that highest priority are at the top.
-        ids.sort_by(|a, b| b.priority.cmp(&a.priority));
-        ids
-    };
+    let ids = generate_priority_ids(num_transactions);
 
     // Generate account keys.
     let account_keys: Vec<_> = (0..num_accounts).map(|_| AccountKey::random()).collect();
 
     // Generate transactions, store in vector with ids to avoid lookup.
+    let mut rng = thread_rng();
     let ids_and_txs: Vec<_> = ids
         .iter()
         .map(|id| {
@@ -163,5 +162,51 @@ fn benchmark_prio_graph_random_access(bencher: &mut Criterion) {
     }
 }
 
+fn bench_prio_graph_no_conflict(
+    bencher: &mut Criterion,
+    num_transactions: u64,
+    num_accounts_per_transaction: usize,
+) {
+    // Generate priority-ordered ids
+    let ids = generate_priority_ids(num_transactions);
+
+    // Generate transactions, store in vector with ids to avoid lookup.
+    let ids_and_txs: Vec<_> = ids
+        .iter()
+        .map(|id| {
+            // Generate unique write-accounts for each.
+            let write_accounts: Vec<_> = (0..num_accounts_per_transaction)
+                .map(|_| AccountKey::random())
+                .collect();
+            (
+                *id,
+                TestTransaction {
+                    read_accounts: vec![],
+                    write_accounts,
+                },
+            )
+        })
+        .collect();
+
+    bench_prio_graph(
+        bencher,
+        &format!("no_conflict_{num_transactions}_{num_accounts_per_transaction}"),
+        &ids_and_txs,
+    );
+}
+
+fn benchmark_prio_graph_no_conflict(bencher: &mut Criterion) {
+    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
+        for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+            bench_prio_graph_no_conflict(
+                bencher,
+                num_transactions,
+                num_accounts_per_transaction as usize,
+            );
+        }
+    }
+}
+
 criterion_group!(random_access, benchmark_prio_graph_random_access);
-criterion_main!(random_access);
+criterion_group!(no_conflict, benchmark_prio_graph_no_conflict);
+criterion_main!(random_access, no_conflict);
