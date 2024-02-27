@@ -98,6 +98,7 @@ fn bench_prio_graph_random_access(
     bencher: &mut Criterion,
     num_transactions: u64,
     num_accounts: u64,
+    num_accounts_per_transaction: usize,
 ) {
     let mut rng = thread_rng();
     let priority_distribution = Uniform::new(0, 1000);
@@ -119,15 +120,12 @@ fn bench_prio_graph_random_access(
     let account_keys: Vec<_> = (0..num_accounts).map(|_| AccountKey::random()).collect();
 
     // Generate transactions, store in vector with ids to avoid lookup.
-    let num_accounts_distribution = Uniform::new(2, 32);
     let ids_and_txs: Vec<_> = ids
         .iter()
         .map(|id| {
-            let transaction_num_accounts = rng.sample(num_accounts_distribution);
-
             // Assume all write-accounts for now.
             let write_accounts = account_keys
-                .choose_multiple(&mut rng, transaction_num_accounts as usize)
+                .choose_multiple(&mut rng, num_accounts_per_transaction)
                 .cloned()
                 .collect();
             (
@@ -142,22 +140,27 @@ fn bench_prio_graph_random_access(
 
     bench_prio_graph(
         bencher,
-        &format!("bench_prio_graph_random_access_{num_transactions}_txs_{num_accounts}_accts"),
+        &format!("random_access_{num_transactions}_{num_accounts}_{num_accounts_per_transaction}"),
         &ids_and_txs,
     );
 }
 
 fn benchmark_prio_graph_random_access(bencher: &mut Criterion) {
-    bench_prio_graph_random_access(bencher, 100, 2);
-    bench_prio_graph_random_access(bencher, 100, 100);
-    bench_prio_graph_random_access(bencher, 100, 1_000);
-    bench_prio_graph_random_access(bencher, 1_000, 2);
-    bench_prio_graph_random_access(bencher, 1_000, 100);
-    bench_prio_graph_random_access(bencher, 1_000, 1_000);
-    bench_prio_graph_random_access(bencher, 1_000, 10_000);
-    bench_prio_graph_random_access(bencher, 10_000, 2);
-    bench_prio_graph_random_access(bencher, 10_000, 1_000);
-    bench_prio_graph_random_access(bencher, 10_000, 10_000);
+    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
+        for num_accounts in [2, 100, 1_000, 10_000].iter().cloned() {
+            for num_accounts_per_transaction in [2, 4, 16, 32, 64, 128, 256].iter().cloned() {
+                if num_accounts_per_transaction > num_accounts {
+                    continue;
+                }
+                bench_prio_graph_random_access(
+                    bencher,
+                    num_transactions,
+                    num_accounts,
+                    num_accounts_per_transaction as usize,
+                );
+            }
+        }
+    }
 }
 
 criterion_group!(random_access, benchmark_prio_graph_random_access);
