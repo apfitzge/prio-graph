@@ -2,7 +2,7 @@ use {
     criterion::{black_box, criterion_group, criterion_main, Criterion},
     prio_graph::{AccessKind, PrioGraph, TopLevelId},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
-    std::{collections::HashMap, fmt::Display, hash::Hash},
+    std::{fmt::Display, hash::Hash},
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -47,6 +47,15 @@ impl TopLevelId<TransactionPriorityId> for TransactionPriorityId {
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
 struct AccountKey([u8; 32]);
 
+impl AccountKey {
+    fn random() -> Self {
+        let mut rng = thread_rng();
+        let mut key = [0u8; 32];
+        rng.fill(&mut key[..]);
+        AccountKey(key)
+    }
+}
+
 struct TestTransaction {
     read_accounts: Vec<AccountKey>,
     write_accounts: Vec<AccountKey>,
@@ -67,6 +76,22 @@ impl TestTransaction {
 
         write_locked_resources.chain(read_locked_resources)
     }
+}
+
+fn bench_prio_graph(
+    bencher: &mut Criterion,
+    name: &str,
+    ids_and_txs: &[(TransactionPriorityId, TestTransaction)],
+) {
+    // Begin bench.
+    bencher.bench_function(name, |bencher| {
+        bencher.iter(|| {
+            let _batches = black_box(PrioGraph::natural_batches(
+                ids_and_txs.iter().map(|(id, tx)| (*id, tx.resources())),
+                |id, _| *id,
+            ));
+        });
+    });
 }
 
 fn bench_prio_graph_random_access(
@@ -91,17 +116,11 @@ fn bench_prio_graph_random_access(
     };
 
     // Generate account keys.
-    let account_keys: Vec<_> = (0..num_accounts)
-        .map(|_| {
-            let mut key = [0u8; 32];
-            rng.fill(&mut key[..]);
-            AccountKey(key)
-        })
-        .collect();
+    let account_keys: Vec<_> = (0..num_accounts).map(|_| AccountKey::random()).collect();
 
-    // Generate transactions, store in lookup table.
+    // Generate transactions, store in vector with ids to avoid lookup.
     let num_accounts_distribution = Uniform::new(2, 32);
-    let transaction_lookup_table: HashMap<_, _> = ids
+    let ids_and_txs: Vec<_> = ids
         .iter()
         .map(|id| {
             let transaction_num_accounts = rng.sample(num_accounts_distribution);
@@ -121,25 +140,10 @@ fn bench_prio_graph_random_access(
         })
         .collect();
 
-    // Begin bench.
-    bencher.bench_function(
+    bench_prio_graph(
+        bencher,
         &format!("bench_prio_graph_random_access_{num_transactions}_txs_{num_accounts}_accts"),
-        |bencher| {
-            bencher.iter(|| {
-                let _batches = black_box(PrioGraph::natural_batches(
-                    ids.iter().cloned().map(|id| {
-                        (
-                            id,
-                            transaction_lookup_table
-                                .get(&id)
-                                .expect("id must exist")
-                                .resources(),
-                        )
-                    }),
-                    |id, _| *id,
-                ));
-            });
-        },
+        &ids_and_txs,
     );
 }
 
