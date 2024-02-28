@@ -1,5 +1,6 @@
 use {
     criterion::{black_box, criterion_group, criterion_main, Criterion},
+    pprof::criterion::{Output, PProfProfiler},
     prio_graph::{AccessKind, PrioGraph, TopLevelId},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{fmt::Display, hash::Hash},
@@ -253,7 +254,25 @@ fn benchmark_prio_graph_all_conflict(bencher: &mut Criterion) {
     }
 }
 
-criterion_group!(random_access, benchmark_prio_graph_random_access);
-criterion_group!(no_conflict, benchmark_prio_graph_no_conflict);
-criterion_group!(all_conflict, benchmark_prio_graph_all_conflict);
+// To profile the benchmarks, run:
+// `cargo bench --bench prio_graph -- [<BENCH GROUP>] --profile-time=5`
+const PPROF_FREQUENCY: i32 = 1000;
+criterion_group!(
+    name = random_access;
+    config = Criterion::default().with_profiler(PProfProfiler::new(PPROF_FREQUENCY, Output::Flamegraph(None)));
+    targets = benchmark_prio_graph_random_access
+);
+
+criterion_group!(
+    name = no_conflict;
+    config = Criterion::default().with_profiler(PProfProfiler::new(PPROF_FREQUENCY, Output::Flamegraph(None)));
+    targets = benchmark_prio_graph_no_conflict
+);
+
+criterion_group!(
+    name = all_conflict;
+    config = Criterion::default().with_profiler(PProfProfiler::new(PPROF_FREQUENCY, Output::Flamegraph(None)));
+    targets = benchmark_prio_graph_all_conflict
+);
+
 criterion_main!(random_access, no_conflict, all_conflict);
