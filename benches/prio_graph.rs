@@ -81,12 +81,14 @@ impl TestTransaction {
 fn generate_priority_ids(num_transactions: u64) -> Vec<TransactionPriorityId> {
     let mut rng = thread_rng();
     let priority_distribution = Uniform::new(0, 1000);
-    (0..num_transactions)
+    let mut ids: Vec<_> = (0..num_transactions)
         .map(|id| TransactionPriorityId {
             id,
             priority: rng.sample(priority_distribution),
         })
-        .collect()
+        .collect();
+    ids.sort_unstable();
+    ids
 }
 
 fn bench_prio_graph(
