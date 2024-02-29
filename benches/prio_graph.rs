@@ -1,6 +1,6 @@
 use {
     criterion::{black_box, criterion_group, criterion_main, Criterion},
-    prio_graph::{AccessKind, PrioGraph, TopLevelId},
+    prio_graph::{AccessKind, TopLevelId},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{fmt::Display, hash::Hash},
 };
@@ -99,7 +99,7 @@ fn bench_prio_graph(
     // Begin bench.
     bencher.bench_function(name, |bencher| {
         bencher.iter(|| {
-            let _batches = black_box(PrioGraph::natural_batches(
+            let _batches = black_box(prio_graph::natural_batches(
                 ids_and_txs.iter().map(|(id, tx)| (*id, tx.resources())),
                 |id, _| *id,
             ));

@@ -5,6 +5,27 @@ use {
     std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
 };
 
+/// Inserts transactions from `iter` into the graph one-by-one.
+/// Then, drains all transactions from the primary queue into a batch.
+/// Then, for each transaction in the batch, unblock transactions it was blocking.
+/// If any of those transactions are now unblocked, add them to the main queue.
+/// Repeat until the main queue is empty.
+pub fn natural_batches<
+    Id: TransactionId,
+    Rk: ResourceKey,
+    Tl: TopLevelId<Id>,
+    Pfn: Fn(&Id, &GraphNode<Id>) -> Tl,
+>(
+    iter: impl IntoIterator<Item = (Id, impl IntoIterator<Item = (Rk, AccessKind)>)>,
+    top_level_prioritization_fn: Pfn,
+) -> Vec<Vec<Id>> {
+    let mut graph = PrioGraph::new(top_level_prioritization_fn);
+    for (id, tx) in iter.into_iter() {
+        graph.insert_transaction(id, tx);
+    }
+    graph.natural_batches()
+}
+
 /// A directed acyclic graph where edges are only present between nodes if
 /// that node is the next-highest priority node for a particular resource.
 /// Resources can be either read or write locked with write locks being
@@ -39,27 +60,18 @@ impl<
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
     /// If any of those transactions are now unblocked, add them to the main queue.
     /// Repeat until the main queue is empty.
-    pub fn natural_batches(
-        iter: impl IntoIterator<Item = (Id, impl IntoIterator<Item = (Rk, AccessKind)>)>,
-        top_level_prioritization_fn: Pfn,
-    ) -> Vec<Vec<Id>> {
-        // Insert all transactions into the graph.
-        let mut graph = PrioGraph::new(top_level_prioritization_fn);
-        for (id, tx) in iter.into_iter() {
-            graph.insert_transaction(id, tx);
-        }
-
+    pub fn natural_batches(&mut self) -> Vec<Vec<Id>> {
         // Create natural batches by manually popping without unblocking at each level.
         let mut batches = vec![];
 
-        while !graph.main_queue.is_empty() {
+        while !self.main_queue.is_empty() {
             let mut batch = Vec::new();
-            while let Some(id) = graph.pop() {
+            while let Some(id) = self.pop() {
                 batch.push(id);
             }
 
             for id in &batch {
-                graph.unblock(id);
+                self.unblock(id);
             }
 
             batches.push(batch);
@@ -295,7 +307,7 @@ mod tests {
         // batches: [3], [2], [1]
         let (transaction_lookup_table, transaction_queue) =
             setup_test([(vec![3, 2, 1], vec![], vec![0])]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -314,7 +326,7 @@ mod tests {
             (vec![7, 5, 3], vec![], vec![1]),
             (vec![6], vec![], vec![2]),
         ]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -335,7 +347,7 @@ mod tests {
             (vec![5, 4], vec![], vec![1]),
             (vec![2, 1], vec![], vec![0, 1]),
         ]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -356,7 +368,7 @@ mod tests {
             (vec![2, 1], vec![], vec![0]),
             (vec![4, 3], vec![], vec![1]),
         ]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -377,7 +389,7 @@ mod tests {
             (vec![9, 8, 4], vec![], vec![0, 1]),
             (vec![7, 6, 3], vec![], vec![1]),
         ]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -406,7 +418,7 @@ mod tests {
             (vec![8, 6, 4, 2], vec![0], vec![1]),
             (vec![7, 5, 3, 1], vec![0], vec![2]),
         ]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -421,7 +433,7 @@ mod tests {
         // Batches: [1]
         let (transaction_lookup_table, transaction_queue) =
             setup_test([(vec![1], vec![0], vec![0])]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -436,7 +448,7 @@ mod tests {
         // Batches: [2, 1]
         let (transaction_lookup_table, transaction_queue) =
             setup_test([(vec![2], vec![0], vec![0]), (vec![1], vec![0], vec![])]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
@@ -453,7 +465,7 @@ mod tests {
         // Batches: [3], [2, 1]
         let (transaction_lookup_table, transaction_queue) =
             setup_test([(vec![3], vec![], vec![0]), (vec![2, 1], vec![0], vec![])]);
-        let batches = PrioGraph::natural_batches(
+        let batches = natural_batches(
             create_lookup_iterator(&transaction_lookup_table, &transaction_queue),
             test_top_level_priority_fn,
         );
