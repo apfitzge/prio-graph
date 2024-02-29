@@ -253,7 +253,129 @@ fn benchmark_prio_graph_all_conflict(bencher: &mut Criterion) {
     }
 }
 
+fn bench_prio_graph_tree(
+    bencher: &mut Criterion,
+    num_transactions: u64,
+    num_trees: u64,
+    branch_length: u64,
+    num_accounts_per_transaction: usize,
+) {
+    // Check for valid input(s).
+    assert!(num_transactions > 0);
+    assert!(num_trees <= num_transactions);
+    assert!(num_transactions % num_trees == 0);
+
+    // Can calculate some properties of the tree-like structure.
+    let num_transactions_per_tree = num_transactions / num_trees;
+    let num_branches = num_transactions_per_tree / (1 + branch_length);
+    let trunk_length = num_transactions_per_tree - num_branches * branch_length;
+    let branch_spacing = trunk_length / num_branches;
+    let concurrent_branches = branch_length / branch_spacing;
+
+    // Sanity check for the shared account generation strategy.
+    assert!(concurrent_branches <= num_accounts_per_transaction as u64,);
+
+    // Generate priority ordered trees.
+    let mut ids_and_txs = vec![];
+    let mut unique_id = 0;
+    for _ in 0..num_trees {
+        // Constant shared write accounts for the main-trunk transactions.
+        // Branches off of the main trunk, will share one of these accounts,
+        // and the remainder will be used in a cycle.
+        let mut write_accounts: Vec<_> = (0..num_accounts_per_transaction)
+            .map(|_| AccountKey::random())
+            .collect();
+        let branch_accounts: Vec<Vec<_>> = (0..concurrent_branches)
+            .map(|_| {
+                // Generate the rest of the branch accounts.
+                (0..(num_accounts_per_transaction - 1))
+                    .map(|_| AccountKey::random())
+                    .collect()
+            })
+            .collect();
+
+        let mut remaining_transactions = num_transactions_per_tree;
+        let mut branch_index = 0;
+        let mut priority = u64::MAX;
+        while remaining_transactions > 0 {
+            // Generate the branch_spacing main-trunk transactions.
+            for _ in 0..branch_spacing {
+                remaining_transactions -= 1;
+
+                let id = TransactionPriorityId {
+                    id: unique_id,
+                    priority,
+                };
+                unique_id += 1;
+                priority -= 1;
+
+                ids_and_txs.push((
+                    id,
+                    TestTransaction {
+                        read_accounts: vec![],
+                        write_accounts: write_accounts.clone(),
+                    },
+                ));
+            }
+
+            // Generate the branch transactions at this point (if remaining transactions).
+            if remaining_transactions > 0 {
+                // Cycle out the shared account for the branch.
+                let account = write_accounts[branch_index];
+                write_accounts[branch_index] = AccountKey::random();
+                let mut branch_accounts = branch_accounts[branch_index].clone();
+                branch_accounts.push(account);
+                // Rotate branch index for the next time we branch.
+                branch_index = (branch_index + 1) % concurrent_branches as usize;
+
+                // Generate the branch_length transactions.
+                for _ in 0..branch_length {
+                    remaining_transactions -= 1;
+
+                    let id = TransactionPriorityId {
+                        id: unique_id,
+                        priority,
+                    };
+                    unique_id += 1;
+                    priority -= 1;
+
+                    ids_and_txs.push((
+                        id,
+                        TestTransaction {
+                            read_accounts: vec![],
+                            write_accounts: branch_accounts.clone(),
+                        },
+                    ));
+                }
+            }
+        }
+    }
+
+    bench_prio_graph(
+        bencher,
+        &format!("tree_{num_transactions}_{branch_length}_{num_accounts_per_transaction}"),
+        &ids_and_txs,
+    );
+}
+
+fn benchmark_prio_graph_tree(bencher: &mut Criterion) {
+    for num_transactions in [100, 1_000].iter().cloned() {
+        for num_accounts_per_transaction in [16, 64, 128].iter().cloned() {
+            for branch_length in [4, 8].iter().cloned() {
+                bench_prio_graph_tree(
+                    bencher,
+                    num_transactions,
+                    1, // single tree
+                    branch_length,
+                    num_accounts_per_transaction as usize,
+                );
+            }
+        }
+    }
+}
+
 criterion_group!(random_access, benchmark_prio_graph_random_access);
 criterion_group!(no_conflict, benchmark_prio_graph_no_conflict);
 criterion_group!(all_conflict, benchmark_prio_graph_all_conflict);
-criterion_main!(random_access, no_conflict, all_conflict);
+criterion_group!(tree, benchmark_prio_graph_tree);
+criterion_main!(no_conflict, all_conflict, tree, random_access);
