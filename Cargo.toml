@@ -19,3 +19,7 @@ rand = { version = "0.8.4" }
 [[bench]]
 name = "prio_graph"
 harness = false
+
+[features]
+bench-insertion-only = []
+bench-popping-only = []
