@@ -1,4 +1,4 @@
-use {crate::TransactionId, std::collections::HashSet};
+use crate::TransactionId;
 
 /// A single node in a priority graph that is associated with a `Transaction`.
 /// When a node reaches the main queue, the top-level prioritization function can use a reference
@@ -11,5 +11,18 @@ pub struct GraphNode<Id: TransactionId> {
     pub(crate) blocked_by_count: usize,
     /// Unique edges from this node.
     /// The number of edges is the same as the number of forks.
-    pub edges: HashSet<Id>,
+    pub edges: Vec<Id>,
+}
+
+impl<Id: TransactionId> GraphNode<Id> {
+    /// Returns true if the edge was added successfully.
+    /// Edges are only added if the edge is unique.
+    pub fn try_add_edge(&mut self, id: Id) -> bool {
+        if self.edges.contains(&id) {
+            false
+        } else {
+            self.edges.push(id);
+            true
+        }
+    }
 }
