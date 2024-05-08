@@ -2,7 +2,8 @@ use {
     crate::{
         lock::Lock, top_level_id::TopLevelId, AccessKind, GraphNode, ResourceKey, TransactionId,
     },
-    std::collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
+    ahash::{AHashMap, AHashSet},
+    std::collections::{hash_map::Entry, BinaryHeap},
 };
 
 /// A directed acyclic graph where edges are only present between nodes if
@@ -18,10 +19,10 @@ pub struct PrioGraph<
     Pfn: Fn(&Id, &GraphNode<Id>) -> Tl,
 > {
     /// Locked resources and which transaction holds them.
-    locks: HashMap<Rk, Lock<Id>>,
+    locks: AHashMap<Rk, Lock<Id>>,
     /// Graph edges and count of edges into each node. The count is used
     /// to detect joins.
-    nodes: HashMap<Id, GraphNode<Id>>,
+    nodes: AHashMap<Id, GraphNode<Id>>,
     /// Main queue - currently unblocked transactions.
     main_queue: BinaryHeap<Tl>,
     /// Priority modification for top-level transactions.
@@ -71,8 +72,8 @@ impl<
     /// Create a new priority graph.
     pub fn new(top_level_prioritization_fn: Pfn) -> Self {
         Self {
-            locks: HashMap::new(),
-            nodes: HashMap::new(),
+            locks: AHashMap::new(),
+            nodes: AHashMap::new(),
             main_queue: BinaryHeap::new(),
             top_level_prioritization_fn,
         }
@@ -83,7 +84,7 @@ impl<
     pub fn insert_transaction(&mut self, id: Id, tx: impl IntoIterator<Item = (Rk, AccessKind)>) {
         let mut node = GraphNode {
             active: true,
-            edges: HashSet::new(),
+            edges: AHashSet::new(),
             blocked_by_count: 0,
         };
 
@@ -149,7 +150,7 @@ impl<
     /// Combination of `pop` and `unblock`.
     /// Returns None if the queue is empty.
     /// Returns the `Id` of the popped node, and the set of unblocked `Id`s.
-    pub fn pop_and_unblock(&mut self) -> Option<(Id, HashSet<Id>)> {
+    pub fn pop_and_unblock(&mut self) -> Option<(Id, AHashSet<Id>)> {
         let id = self.pop()?;
         Some((id, self.unblock(&id)))
     }
@@ -166,7 +167,7 @@ impl<
     /// Panics:
     ///     - Node does not exist.
     ///     - If the node.blocked_by_count != 0
-    pub fn unblock(&mut self, id: &Id) -> HashSet<Id> {
+    pub fn unblock(&mut self, id: &Id) -> AHashSet<Id> {
         // If the node is already removed, do nothing.
         let Some(node) = self.nodes.get_mut(id) else {
             panic!("node must exist");
@@ -240,8 +241,8 @@ mod tests {
     // and the read and write locked resources for each transaction.
     fn setup_test(
         transaction_groups: impl IntoIterator<Item = (Vec<TxId>, Vec<Account>, Vec<Account>)>,
-    ) -> (HashMap<TxId, Tx>, Vec<TxId>) {
-        let mut transaction_lookup_table = HashMap::new();
+    ) -> (AHashMap<TxId, Tx>, Vec<TxId>) {
+        let mut transaction_lookup_table = AHashMap::new();
         let mut priority_ordered_ids = vec![];
         for (ids, read_accounts, write_accounts) in transaction_groups {
             for id in &ids {
@@ -263,7 +264,7 @@ mod tests {
     }
 
     fn create_lookup_iterator<'a>(
-        transaction_lookup_table: &'a HashMap<TxId, Tx>,
+        transaction_lookup_table: &'a AHashMap<TxId, Tx>,
         reverse_priority_order_ids: &'a [TxId],
     ) -> impl Iterator<Item = (TxId, impl IntoIterator<Item = (Account, AccessKind)> + 'a)> + 'a
     {

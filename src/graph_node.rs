@@ -1,4 +1,4 @@
-use {crate::TransactionId, std::collections::HashSet};
+use {crate::TransactionId, ahash::AHashSet};
 
 /// A single node in a priority graph that is associated with a `Transaction`.
 /// When a node reaches the main queue, the top-level prioritization function can use a reference
@@ -11,5 +11,5 @@ pub struct GraphNode<Id: TransactionId> {
     pub(crate) blocked_by_count: usize,
     /// Unique edges from this node.
     /// The number of edges is the same as the number of forks.
-    pub edges: HashSet<Id>,
+    pub edges: AHashSet<Id>,
 }
