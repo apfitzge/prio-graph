@@ -97,12 +97,14 @@ fn bench_prio_graph(
     ids_and_txs: &[(TransactionPriorityId, TestTransaction)],
 ) {
     // Begin bench.
+    let mut prio_graph = PrioGraph::new(|id, _| *id);
     bencher.bench_function(name, |bencher| {
         bencher.iter(|| {
-            let _batches = black_box(PrioGraph::natural_batches(
-                ids_and_txs.iter().map(|(id, tx)| (*id, tx.resources())),
-                |id, _| *id,
-            ));
+            for (id, tx) in ids_and_txs.iter() {
+                prio_graph.insert_transaction(*id, tx.resources());
+            }
+            let _batches = black_box(prio_graph.make_natural_batches());
+            prio_graph.clear();
         });
     });
 }

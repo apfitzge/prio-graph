@@ -63,6 +63,13 @@ impl<
         }
     }
 
+    /// Clear the graph.
+    pub fn clear(&mut self) {
+        self.main_queue.clear();
+        self.locks.clear();
+        self.nodes.clear();
+    }
+
     /// Make natural batches from the transactions already inserted into the graph.
     /// Drains all transactions from the primary queue into a batch.
     /// Then, for each transaction in the batch, unblock transactions it was blocking.
