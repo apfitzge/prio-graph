@@ -20,3 +20,9 @@ rand = { version = "0.8.4" }
 [[bench]]
 name = "prio_graph"
 harness = false
+
+[features]
+# Benchmark graph insertion only. Conflicts with `bench-popping-only`
+bench-insertion-only = []
+# Benchmark graph popping only. Conflicts with `bench-insertion-only`
+bench-popping-only = []

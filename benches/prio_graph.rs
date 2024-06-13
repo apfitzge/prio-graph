@@ -1,6 +1,6 @@
 use {
-    criterion::{black_box, criterion_group, criterion_main, Criterion},
-    prio_graph::{AccessKind, PrioGraph, TopLevelId},
+    criterion::{criterion_group, criterion_main, Criterion},
+    prio_graph::{AccessKind, TopLevelId},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{fmt::Display, hash::Hash},
 };
@@ -91,19 +91,63 @@ fn generate_priority_ids(num_transactions: u64) -> Vec<TransactionPriorityId> {
     ids
 }
 
+#[cfg(not(any(feature = "bench-insertion-only", feature = "bench-popping-only")))]
 fn bench_prio_graph(
     bencher: &mut Criterion,
     name: &str,
     ids_and_txs: &[(TransactionPriorityId, TestTransaction)],
 ) {
+    use criterion::black_box;
+
     // Begin bench.
     bencher.bench_function(name, |bencher| {
         bencher.iter(|| {
-            let _batches = black_box(PrioGraph::natural_batches(
+            let _batches = black_box(prio_graph::natural_batches(
                 ids_and_txs.iter().map(|(id, tx)| (*id, tx.resources())),
                 |id, _| *id,
             ));
         });
+    });
+}
+
+#[cfg(feature = "bench-insertion-only")]
+fn bench_prio_graph(
+    bencher: &mut Criterion,
+    name: &str,
+    ids_and_txs: &[(TransactionPriorityId, TestTransaction)],
+) {
+    use prio_graph::PrioGraph;
+    // Begin bench.
+    bencher.bench_function(name, |bencher| {
+        bencher.iter(|| {
+            let mut graph = PrioGraph::new(|id, _| *id);
+            for (id, tx) in ids_and_txs.iter() {
+                graph.insert_transaction(*id, tx.resources());
+            }
+        });
+    });
+}
+
+#[cfg(feature = "bench-popping-only")]
+fn bench_prio_graph(
+    bencher: &mut Criterion,
+    name: &str,
+    ids_and_txs: &[(TransactionPriorityId, TestTransaction)],
+) {
+    use {criterion::BatchSize, prio_graph::PrioGraph};
+    // Begin bench.
+    bencher.bench_function(name, |bencher| {
+        bencher.iter_batched_ref(
+            || {
+                let mut graph = PrioGraph::new(|id, _| *id);
+                for (id, tx) in ids_and_txs.iter() {
+                    graph.insert_transaction(*id, tx.resources());
+                }
+                graph
+            },
+            |graph| graph.natural_batches(),
+            BatchSize::PerIteration,
+        );
     });
 }
 
