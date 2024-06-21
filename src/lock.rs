@@ -1,4 +1,7 @@
-use crate::{AccessKind, TransactionId};
+use {
+    crate::{AccessKind, TransactionId},
+    smallvec::{smallvec, SmallVec},
+};
 
 /// A read-lock can be held by multiple transactions, and
 /// subsequent write-locks should be blocked by all of them.
@@ -6,7 +9,7 @@ use crate::{AccessKind, TransactionId};
 pub(crate) struct Lock<Id: TransactionId> {
     kind: AccessKind,
     // Current Reads or Write
-    current_locks: Vec<Id>,
+    current_locks: SmallVec<[Id; 4]>,
     most_recent_write: Option<Id>,
 }
 
@@ -14,7 +17,7 @@ impl<Id: TransactionId> Lock<Id> {
     pub fn new(id: Id, kind: AccessKind) -> Self {
         Self {
             kind,
-            current_locks: vec![id],
+            current_locks: smallvec![id],
             most_recent_write: None,
         }
     }
