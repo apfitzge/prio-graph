@@ -50,23 +50,7 @@ impl<
             graph.insert_transaction(id, tx);
         }
 
-        // Create natural batches by manually popping without unblocking at each level.
-        let mut batches = vec![];
-
-        while !graph.main_queue.is_empty() {
-            let mut batch = Vec::new();
-            while let Some(id) = graph.pop() {
-                batch.push(id);
-            }
-
-            for id in &batch {
-                graph.unblock(id);
-            }
-
-            batches.push(batch);
-        }
-
-        batches
+        graph.make_natural_batches()
     }
 
     /// Create a new priority graph.
@@ -77,6 +61,31 @@ impl<
             main_queue: BinaryHeap::new(),
             top_level_prioritization_fn,
         }
+    }
+
+    /// Make natural batches from the transactions already inserted into the graph.
+    /// Drains all transactions from the primary queue into a batch.
+    /// Then, for each transaction in the batch, unblock transactions it was blocking.
+    /// If any of those transactions are now unblocked, add them to the main queue.
+    /// Repeat until the main queue is empty.
+    pub fn make_natural_batches(&mut self) -> Vec<Vec<Id>> {
+        // Create natural batches by manually popping without unblocking at each level.
+        let mut batches = vec![];
+
+        while !self.main_queue.is_empty() {
+            let mut batch = Vec::new();
+            while let Some(id) = self.pop() {
+                batch.push(id);
+            }
+
+            for id in &batch {
+                self.unblock(id);
+            }
+
+            batches.push(batch);
+        }
+
+        batches
     }
 
     /// Insert a transaction into the graph with the given `Id`.
