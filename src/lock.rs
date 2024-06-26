@@ -44,9 +44,10 @@ impl<Id: TransactionId> Lock<Id> {
                     return;
                 }
 
-                for id in self.current_locks.drain(..) {
-                    conflict_callback(&id);
-                }
+                // Only single lock, so call on the conflict and
+                // clear the current lock.
+                conflict_callback(&current_write_id);
+                self.current_locks.clear();
                 self.kind = AccessKind::Read;
                 self.current_locks.push(id);
                 self.most_recent_write = Some(current_write_id);
@@ -73,9 +74,11 @@ impl<Id: TransactionId> Lock<Id> {
                     return;
                 }
 
-                for id in self.current_locks.drain(..) {
-                    conflict_callback(&id);
-                }
+                // Only single lock, so call on the conflict and
+                // clear the current lock.
+                conflict_callback(&current_write_id);
+                self.current_locks.clear();
+
                 self.current_locks.push(id);
             }
         }
