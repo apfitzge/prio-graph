@@ -257,6 +257,49 @@ fn benchmark_prio_graph_all_conflict(bencher: &mut Criterion) {
     }
 }
 
+fn bench_prio_graph_read_write(bencher: &mut Criterion, num_transactions: u64, num_reads: usize) {
+    // Generate priority-ordered ids
+    let ids = generate_priority_ids(num_transactions);
+
+    // A single shared account for all transactions.
+    let accounts = vec![AccountKey::random()];
+
+    // Generate transactions, store in vector with ids to avoid lookup.
+    // Every num_reads + 1 transaction will write the shared account.
+    let ids_and_txs: Vec<_> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| {
+            let (read_accounts, write_accounts) = if i % (num_reads + 1) == 0 {
+                (vec![], accounts.clone())
+            } else {
+                (accounts.clone(), vec![])
+            };
+            (
+                *id,
+                TestTransaction {
+                    read_accounts,
+                    write_accounts,
+                },
+            )
+        })
+        .collect();
+
+    bench_prio_graph(
+        bencher,
+        &format!("read_write_{num_transactions}_{num_reads}"),
+        &ids_and_txs,
+    );
+}
+
+fn benchmark_prio_graph_read_write(bencher: &mut Criterion) {
+    for num_transactions in [100, 1_000, 10_000] {
+        for num_reads in [1, 2, 4, 8, 16] {
+            bench_prio_graph_read_write(bencher, num_transactions, num_reads);
+        }
+    }
+}
+
 fn bench_prio_graph_tree(
     bencher: &mut Criterion,
     num_transactions: u64,
@@ -381,5 +424,6 @@ fn benchmark_prio_graph_tree(bencher: &mut Criterion) {
 criterion_group!(random_access, benchmark_prio_graph_random_access);
 criterion_group!(no_conflict, benchmark_prio_graph_no_conflict);
 criterion_group!(all_conflict, benchmark_prio_graph_all_conflict);
+criterion_group!(read_write, benchmark_prio_graph_read_write);
 criterion_group!(tree, benchmark_prio_graph_tree);
-criterion_main!(no_conflict, all_conflict, tree, random_access);
+criterion_main!(no_conflict, all_conflict, read_write, tree, random_access);
