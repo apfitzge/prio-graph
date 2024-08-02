@@ -153,9 +153,9 @@ fn bench_prio_graph_random_access(
 
 fn benchmark_prio_graph_random_access(bencher: &mut Criterion) {
     let mut group = bencher.benchmark_group("random_access");
-    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
-        for num_accounts in [2, 100, 1_000, 10_000].iter().cloned() {
-            for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+    for num_transactions in [100, 1_000].iter().cloned() {
+        for num_accounts in [100, 10_000].iter().cloned() {
+            for num_accounts_per_transaction in [2, 64, 128].iter().cloned() {
                 if num_accounts_per_transaction > num_accounts {
                     continue;
                 }
@@ -206,8 +206,8 @@ fn bench_prio_graph_no_conflict(
 
 fn benchmark_prio_graph_no_conflict(bencher: &mut Criterion) {
     let mut group = bencher.benchmark_group("no_conflict");
-    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
-        for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+    for num_transactions in [100, 1_000].iter().cloned() {
+        for num_accounts_per_transaction in [2, 64, 128].iter().cloned() {
             group.throughput(criterion::Throughput::Elements(num_transactions));
             bench_prio_graph_no_conflict(
                 &mut group,
@@ -254,8 +254,8 @@ fn bench_prio_graph_all_conflict(
 
 fn benchmark_prio_graph_all_conflict(bencher: &mut Criterion) {
     let mut group = bencher.benchmark_group("all_conflict");
-    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
-        for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+    for num_transactions in [100, 1_000].iter().cloned() {
+        for num_accounts_per_transaction in [2, 64, 128].iter().cloned() {
             group.throughput(criterion::Throughput::Elements(num_transactions));
             bench_prio_graph_all_conflict(
                 &mut group,
@@ -307,8 +307,8 @@ fn bench_prio_graph_read_write(
 
 fn benchmark_prio_graph_read_write(bencher: &mut Criterion) {
     let mut group = bencher.benchmark_group("read_write");
-    for num_transactions in [100, 1_000, 10_000] {
-        for num_reads in [1, 2, 4, 8, 16] {
+    for num_transactions in [100, 1_000] {
+        for num_reads in [1, 8, 16] {
             group.throughput(criterion::Throughput::Elements(num_transactions));
             bench_prio_graph_read_write(&mut group, num_transactions, num_reads);
         }
