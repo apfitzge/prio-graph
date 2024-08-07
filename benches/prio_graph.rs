@@ -1,5 +1,8 @@
 use {
-    criterion::{black_box, criterion_group, criterion_main, Criterion},
+    criterion::{
+        black_box, criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup,
+        Criterion,
+    },
     prio_graph::{AccessKind, PrioGraph, TopLevelId},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{fmt::Display, hash::Hash},
@@ -92,13 +95,13 @@ fn generate_priority_ids(num_transactions: u64) -> Vec<TransactionPriorityId> {
 }
 
 fn bench_prio_graph(
-    bencher: &mut Criterion,
+    group: &mut BenchmarkGroup<impl Measurement>,
     name: &str,
     ids_and_txs: &[(TransactionPriorityId, TestTransaction)],
 ) {
     // Begin bench.
     let mut prio_graph = PrioGraph::new(|id, _| *id);
-    bencher.bench_function(name, |bencher| {
+    group.bench_function(name, |bencher| {
         bencher.iter(|| {
             for (id, tx) in ids_and_txs.iter() {
                 prio_graph.insert_transaction(*id, tx.resources());
@@ -110,7 +113,7 @@ fn bench_prio_graph(
 }
 
 fn bench_prio_graph_random_access(
-    bencher: &mut Criterion,
+    group: &mut BenchmarkGroup<impl Measurement>,
     num_transactions: u64,
     num_accounts: u64,
     num_accounts_per_transaction: usize,
@@ -142,21 +145,23 @@ fn bench_prio_graph_random_access(
         .collect();
 
     bench_prio_graph(
-        bencher,
-        &format!("random_access_{num_transactions}_{num_accounts}_{num_accounts_per_transaction}"),
+        group,
+        &format!("{num_transactions}_{num_accounts}_{num_accounts_per_transaction}"),
         &ids_and_txs,
     );
 }
 
 fn benchmark_prio_graph_random_access(bencher: &mut Criterion) {
-    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
-        for num_accounts in [2, 100, 1_000, 10_000].iter().cloned() {
-            for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+    let mut group = bencher.benchmark_group("random_access");
+    for num_transactions in [100, 1_000].iter().cloned() {
+        for num_accounts in [100, 10_000].iter().cloned() {
+            for num_accounts_per_transaction in [2, 64, 128].iter().cloned() {
                 if num_accounts_per_transaction > num_accounts {
                     continue;
                 }
+                group.throughput(criterion::Throughput::Elements(num_transactions));
                 bench_prio_graph_random_access(
-                    bencher,
+                    &mut group,
                     num_transactions,
                     num_accounts,
                     num_accounts_per_transaction as usize,
@@ -167,7 +172,7 @@ fn benchmark_prio_graph_random_access(bencher: &mut Criterion) {
 }
 
 fn bench_prio_graph_no_conflict(
-    bencher: &mut Criterion,
+    group: &mut BenchmarkGroup<impl Measurement>,
     num_transactions: u64,
     num_accounts_per_transaction: usize,
 ) {
@@ -193,17 +198,19 @@ fn bench_prio_graph_no_conflict(
         .collect();
 
     bench_prio_graph(
-        bencher,
-        &format!("no_conflict_{num_transactions}_{num_accounts_per_transaction}"),
+        group,
+        &format!("{num_transactions}_{num_accounts_per_transaction}"),
         &ids_and_txs,
     );
 }
 
 fn benchmark_prio_graph_no_conflict(bencher: &mut Criterion) {
-    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
-        for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+    let mut group = bencher.benchmark_group("no_conflict");
+    for num_transactions in [100, 1_000].iter().cloned() {
+        for num_accounts_per_transaction in [2, 64, 128].iter().cloned() {
+            group.throughput(criterion::Throughput::Elements(num_transactions));
             bench_prio_graph_no_conflict(
-                bencher,
+                &mut group,
                 num_transactions,
                 num_accounts_per_transaction as usize,
             );
@@ -212,7 +219,7 @@ fn benchmark_prio_graph_no_conflict(bencher: &mut Criterion) {
 }
 
 fn bench_prio_graph_all_conflict(
-    bencher: &mut Criterion,
+    group: &mut BenchmarkGroup<impl Measurement>,
     num_transactions: u64,
     num_accounts_per_transaction: usize,
 ) {
@@ -239,17 +246,19 @@ fn bench_prio_graph_all_conflict(
         .collect();
 
     bench_prio_graph(
-        bencher,
-        &format!("all_conflict_{num_transactions}_{num_accounts_per_transaction}"),
+        group,
+        &format!("{num_transactions}_{num_accounts_per_transaction}"),
         &ids_and_txs,
     );
 }
 
 fn benchmark_prio_graph_all_conflict(bencher: &mut Criterion) {
-    for num_transactions in [100, 1_000, 10_000].iter().cloned() {
-        for num_accounts_per_transaction in [2, 16, 32, 64, 128, 256].iter().cloned() {
+    let mut group = bencher.benchmark_group("all_conflict");
+    for num_transactions in [100, 1_000].iter().cloned() {
+        for num_accounts_per_transaction in [2, 64, 128].iter().cloned() {
+            group.throughput(criterion::Throughput::Elements(num_transactions));
             bench_prio_graph_all_conflict(
-                bencher,
+                &mut group,
                 num_transactions,
                 num_accounts_per_transaction as usize,
             );
@@ -257,7 +266,11 @@ fn benchmark_prio_graph_all_conflict(bencher: &mut Criterion) {
     }
 }
 
-fn bench_prio_graph_read_write(bencher: &mut Criterion, num_transactions: u64, num_reads: usize) {
+fn bench_prio_graph_read_write(
+    group: &mut BenchmarkGroup<impl Measurement>,
+    num_transactions: u64,
+    num_reads: usize,
+) {
     // Generate priority-ordered ids
     let ids = generate_priority_ids(num_transactions);
 
@@ -286,22 +299,24 @@ fn bench_prio_graph_read_write(bencher: &mut Criterion, num_transactions: u64, n
         .collect();
 
     bench_prio_graph(
-        bencher,
-        &format!("read_write_{num_transactions}_{num_reads}"),
+        group,
+        &format!("{num_transactions}_{num_reads}"),
         &ids_and_txs,
     );
 }
 
 fn benchmark_prio_graph_read_write(bencher: &mut Criterion) {
-    for num_transactions in [100, 1_000, 10_000] {
-        for num_reads in [1, 2, 4, 8, 16] {
-            bench_prio_graph_read_write(bencher, num_transactions, num_reads);
+    let mut group = bencher.benchmark_group("read_write");
+    for num_transactions in [100, 1_000] {
+        for num_reads in [1, 8, 16] {
+            group.throughput(criterion::Throughput::Elements(num_transactions));
+            bench_prio_graph_read_write(&mut group, num_transactions, num_reads);
         }
     }
 }
 
 fn bench_prio_graph_tree(
-    bencher: &mut Criterion,
+    group: &mut BenchmarkGroup<impl Measurement>,
     num_transactions: u64,
     num_trees: u64,
     branch_length: u64,
@@ -399,18 +414,20 @@ fn bench_prio_graph_tree(
     }
 
     bench_prio_graph(
-        bencher,
-        &format!("tree_{num_transactions}_{branch_length}_{num_accounts_per_transaction}"),
+        group,
+        &format!("{num_transactions}_{branch_length}_{num_accounts_per_transaction}"),
         &ids_and_txs,
     );
 }
 
 fn benchmark_prio_graph_tree(bencher: &mut Criterion) {
+    let mut group = bencher.benchmark_group("tree");
     for num_transactions in [100, 1_000].iter().cloned() {
         for num_accounts_per_transaction in [16, 64, 128].iter().cloned() {
             for branch_length in [4, 8].iter().cloned() {
+                group.throughput(criterion::Throughput::Elements(num_transactions));
                 bench_prio_graph_tree(
-                    bencher,
+                    &mut group,
                     num_transactions,
                     1, // single tree
                     branch_length,
