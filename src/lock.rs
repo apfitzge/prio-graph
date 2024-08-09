@@ -9,7 +9,7 @@ use {
 pub(crate) struct Lock<Id: TransactionId> {
     kind: AccessKind,
     // Current Reads or Write
-    current_locks: SmallVec<[Id; 4]>,
+    current_locks: SmallVec<[Id; 1]>,
     // This can only be populated when the current lock is a read-lock, and
     // there has been a previous write-lock.
     // Tracks the most recent, but not current, write-lock.
