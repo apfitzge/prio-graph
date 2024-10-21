@@ -19,4 +19,5 @@ rand = { version = "0.8.4" }
 
 [[bench]]
 name = "prio_graph"
+path = "benches/prio_graph.rs"
 harness = false
