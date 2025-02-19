@@ -295,12 +295,6 @@ mod tests {
         })
     }
 
-    impl TopLevelId<TxId> for TxId {
-        fn id(&self) -> TxId {
-            *self
-        }
-    }
-
     fn test_top_level_priority_fn(id: &TxId, _node: &GraphNode<TxId>) -> TxId {
         *id
     }
