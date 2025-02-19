@@ -3,7 +3,7 @@ use {
         black_box, criterion_group, criterion_main, measurement::Measurement, BenchmarkGroup,
         Criterion,
     },
-    prio_graph::{AccessKind, PrioGraph, TopLevelId},
+    prio_graph::{AccessKind, PrioGraph},
     rand::{distributions::Uniform, seq::SliceRandom, thread_rng, Rng},
     std::{fmt::Display, hash::Hash},
 };
@@ -38,12 +38,6 @@ impl PartialOrd for TransactionPriorityId {
 impl Display for TransactionPriorityId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "(id: {}, prio: {})", self.id, self.priority)
-    }
-}
-
-impl TopLevelId<TransactionPriorityId> for TransactionPriorityId {
-    fn id(&self) -> TransactionPriorityId {
-        *self
     }
 }
 
