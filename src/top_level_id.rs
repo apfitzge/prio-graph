@@ -5,13 +5,11 @@ pub trait TopLevelId<Id: TransactionId>: Eq + PartialEq + Ord + PartialOrd {
     fn id(&self) -> Id;
 }
 
-
 impl<Id: TransactionId + Ord> TopLevelId<Id> for Id {
     fn id(&self) -> Id {
-        self.clone()
+        *self
     }
 }
-
 
 #[test]
 fn integration_test_u64() {
