@@ -104,14 +104,14 @@ impl<
             blocked_by_count: 0,
         };
 
-        let mut block_tx = |blocking_id: Id| {
+        let mut block_tx = |blocking_id: &Id| {
             // If the blocking transaction is the same as the current transaction, do nothing.
             // This indicates the transaction has multiple accesses to the same resource.
-            if blocking_id == id {
+            if *blocking_id == id {
                 return;
             }
 
-            let Some(blocking_tx_node) = self.nodes.get_mut(&blocking_id) else {
+            let Some(blocking_tx_node) = self.nodes.get_mut(blocking_id) else {
                 panic!("blocking node must exist");
             };
 
@@ -128,24 +128,11 @@ impl<
         for (resource_key, access_kind) in tx.into_iter() {
             match self.locks.entry(resource_key) {
                 Entry::Vacant(entry) => {
-                    entry.insert(match access_kind {
-                        AccessKind::Read => Lock::Read(vec![id], None),
-                        AccessKind::Write => Lock::Write(id),
-                    });
+                    entry.insert(Lock::new(id, access_kind));
                 }
                 Entry::Occupied(mut entry) => match access_kind {
-                    AccessKind::Read => {
-                        if let Some(blocking_tx) = entry.get_mut().add_read(id) {
-                            block_tx(blocking_tx);
-                        }
-                    }
-                    AccessKind::Write => {
-                        if let Some(blocking_txs) = entry.get_mut().add_write(id) {
-                            for blocking_tx in blocking_txs {
-                                block_tx(blocking_tx);
-                            }
-                        }
-                    }
+                    AccessKind::Read => entry.get_mut().add_read(id, &mut block_tx),
+                    AccessKind::Write => entry.get_mut().add_write(id, &mut block_tx),
                 },
             }
         }
